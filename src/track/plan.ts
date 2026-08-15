@@ -34,7 +34,7 @@ export function toMetresPerSecond(unitsPerSecond: number): number {
 }
 
 /**
- * Ceiling on marble speed, in units per second (1 m/s).
+ * Ceiling on marble speed, in units per second (0.8 m/s).
  *
  * Approached rather than clamped: a drag term ramps up steeply near it, so
  * marbles settle around it the way air resistance would, instead of hitting an
@@ -42,7 +42,7 @@ export function toMetresPerSecond(unitsPerSecond: number): number {
  * physics step than the track shell is thick, which is what would let one pass
  * straight through the floor.
  */
-export const MAX_MARBLE_SPEED = 1.0 * UNITS_PER_METRE;
+export const MAX_MARBLE_SPEED = 0.8 * UNITS_PER_METRE;
 
 /**
  * The two numbers that between them set how fast the run flows.
@@ -62,20 +62,23 @@ export const MAX_MARBLE_SPEED = 1.0 * UNITS_PER_METRE;
  */
 export const PHYSICS = {
   rollingResistance: 0.018,
-  pitchScale: 0.75,
+  pitchScale: 0.72,
 };
 
-/** Kinds of hazard the generator can sprinkle along a run. */
+/**
+ * Kinds of obstacle the generator can place.
+ *
+ * All static. Moving parts were tried and removed: a kinematic obstacle pushes
+ * with effectively infinite force and can pin a marble unrecoverably, and at
+ * these speeds a marble has so little momentum that a swinging or spinning
+ * part stops it dead rather than deflecting it.
+ */
 export type ObstacleKind =
-  | "spinner" // rotating cross-paddle sweeping the channel
-  | "pendulum" // hammer swinging across the track
-  | "pegs" // pachinko field in a widened section
-  | "bumpers" // bouncy posts that fling marbles sideways
-  | "gate" // flipping barrier that opens and closes on a cycle
-  | "boost" // ramp kicker that speeds marbles up
-  | "divider" // island splitting the channel into two lanes
-  | "drum" // rotating barrel with cut-out slots
-  | "fan"; // crosswind zone pushing marbles to one side
+  | "pins" // regular field of pins — a bowling triangle or a square grid
+  | "wedge" // triangular splitter, apex upstream, sending marbles left or right
+  | "baffles" // short walls from alternating sides, so the run has to weave
+  | "posts" // a row of stouter posts down the channel
+  | "divider"; // island splitting the channel into two lanes
 
 export interface ObstacleSpec {
   kind: ObstacleKind;

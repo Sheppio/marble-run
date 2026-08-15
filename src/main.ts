@@ -72,7 +72,10 @@ function disposeWorld(): void {
 function showSetup(): void {
   disposeWorld();
   showScreen(
-    new SetupScreen({ names: roster, seed }, (result) => {
+    // An empty roster must be passed as undefined, not as an empty array, or
+    // the setup screen treats "no names supplied" as "the user wants no
+    // racers" and never falls back to the saved roster.
+    new SetupScreen({ names: roster.length > 0 ? roster : undefined, seed }, (result) => {
       roster = result.names;
       seed = result.seed;
       void startRace();

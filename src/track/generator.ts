@@ -109,7 +109,7 @@ const CREST_G_BUDGET = 0.55;
  * be everywhere. Comfortably above 1, so a marble set down anywhere rolls off
  * with intent rather than creeping.
  */
-const DESCENT_SAFETY_FACTOR = 2.8;
+const DESCENT_SAFETY_FACTOR = 3.4;
 /**
  * How much of a wave segment's descent its own gradient may use up. Below 1
  * the track still runs downhill everywhere, so a marble never has to climb.
@@ -665,17 +665,7 @@ function collectGaps(gapFlags: boolean[]): GapSpec[] {
   return gaps;
 }
 
-const OBSTACLE_KINDS: ObstacleKind[] = [
-  "spinner",
-  "pendulum",
-  "pegs",
-  "bumpers",
-  "gate",
-  "boost",
-  "divider",
-  "drum",
-  "fan",
-];
+const OBSTACLE_KINDS: ObstacleKind[] = ["pins", "wedge", "baffles", "posts", "divider"];
 
 /** Places hazards along the finished centreline. */
 function placeObstacles(
@@ -710,26 +700,22 @@ function placeObstacles(
 
     // Weight the choice by what the track is doing here: pegs and dividers want
     // width, spinners and gates want a reasonably straight run at them.
+    // Wide stretches suit the patterns that need room; anything narrow gets
+    // the obstacles that only need a lane either side.
     const weights = OBSTACLE_KINDS.map((kind) => {
       switch (kind) {
-        case "pegs":
-          return roomy > 1.5 ? 2.4 : 0.05;
+        case "pins":
+          return roomy > 1.4 ? 3.0 : 1.2;
+        case "wedge":
+          return straightness * 1.6 + 0.4;
+        case "baffles":
+          // Kept rare on purpose: of the static obstacles this is the one
+          // marbles most often come to rest against.
+          return straightness * 0.7 + 0.1;
+        case "posts":
+          return 1.2;
         case "divider":
-          return roomy > 1.4 ? 1.6 : 0.05;
-        case "bumpers":
-          return roomy > 1.3 ? 1.4 : 0.3;
-        case "spinner":
-          return straightness * 1.8 + 0.2;
-        case "pendulum":
-          return straightness * 1.5 + 0.2;
-        case "gate":
-          return straightness * 1.2 + 0.1;
-        case "drum":
-          return straightness * 0.9;
-        case "boost":
-          return 1.0;
-        case "fan":
-          return 0.7;
+          return roomy > 1.3 ? 1.4 : 0.4;
       }
     });
 
@@ -747,50 +733,30 @@ function placeObstacles(
 
 function rollObstacleParams(rng: Rng, kind: ObstacleKind): Record<string, number> {
   switch (kind) {
-    case "spinner":
+    case "pins":
       return {
-        speed: rng.range(0.5, 1.2) * (rng.chance(0.5) ? 1 : -1),
-        blades: rng.int(3, 4),
-        phase: rng.range(0, Math.PI * 2),
+        // Below 0.5 a bowling triangle, above it a square grid.
+        pattern: rng.next(),
+        rows: rng.int(3, 5),
+        columns: rng.int(2, 4),
       };
-    case "pendulum":
-      return {
-        period: rng.range(1.4, 2.4),
-        swing: rng.range(0.55, 1.0),
-        phase: rng.range(0, Math.PI * 2),
-      };
-    case "pegs":
-      return { rows: rng.int(3, 5), perRow: rng.int(2, 4), stagger: rng.range(0.3, 0.6) };
-    case "bumpers":
-      // Gentle: at these speeds a lively bumper simply stops a marble dead.
-      return { count: rng.int(2, 3), bounce: rng.range(0.3, 0.45) };
-    case "gate":
-      return { period: rng.range(3.0, 4.5), phase: rng.range(0, Math.PI * 2), leaves: rng.int(1, 2) };
-    case "boost":
-      // Strength is expressed in g, so it stays meaningful across scales.
-      return { strength: rng.range(0.25, 0.5), length: rng.range(9, 16) };
+    case "wedge":
+      return { offset: rng.range(-0.5, 0.5) };
+    case "baffles":
+      return { count: rng.int(2, 4) };
+    case "posts":
+      return { count: rng.int(2, 4), spread: rng.range(0.45, 0.8) };
     case "divider":
-      return { length: rng.range(22, 44), offset: rng.range(-0.12, 0.12) };
-    case "drum":
-      return { speed: rng.range(0.35, 0.8) * (rng.chance(0.5) ? 1 : -1), slots: rng.int(3, 4) };
-    case "fan":
-      return {
-        strength: rng.range(0.14, 0.3) * (rng.chance(0.5) ? 1 : -1),
-        length: rng.range(18, 32),
-      };
+      return { length: rng.range(22, 44), offset: rng.range(-0.1, 0.1) };
   }
 }
 
 const HIGHLIGHT_LABELS: Record<ObstacleKind, string> = {
-  spinner: "Spinners",
-  pendulum: "Wrecking balls",
-  pegs: "Pachinko field",
-  bumpers: "Bumpers",
-  gate: "Timed gates",
-  boost: "Boost pads",
+  pins: "Pin field",
+  wedge: "Splitters",
+  baffles: "Weave",
+  posts: "Posts",
   divider: "Split lanes",
-  drum: "Rolling drum",
-  fan: "Crosswind",
 };
 
 /**

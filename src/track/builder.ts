@@ -2,12 +2,12 @@ import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
-import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import { PhysicsAggregate } from "@babylonjs/core/Physics/v2/physicsAggregate";
 import { PhysicsShapeType } from "@babylonjs/core/Physics/v2/IPhysicsEnginePlugin";
 import type { Scene } from "@babylonjs/core/scene";
 import { TRACK_CONSTANTS } from "./plan";
 import type { TrackGeometry } from "./geometry";
+import { createTimberMaterial, type TimberPalette } from "../render/materials";
 
 /**
  * Sweeps the channel cross-section along the centreline to produce one solid
@@ -62,17 +62,10 @@ export interface TrackMeshes {
   dispose(): void;
 }
 
-export interface TrackPalette {
-  floor: Color3;
-  wall: Color3;
-  underside: Color3;
-  stripe: Color3;
-}
-
 export function buildTrackMesh(
   scene: Scene,
   geometry: TrackGeometry,
-  palette: TrackPalette,
+  palette: TimberPalette,
 ): TrackMeshes {
   const { frames } = geometry;
   const { shellThickness } = TRACK_CONSTANTS;
@@ -184,12 +177,8 @@ export function buildTrackMesh(
     vertexData.applyToMesh(shell, false);
   }
 
-  const material = new PBRMaterial("track-mat", scene);
-  material.metallic = 0.05;
-  material.roughness = 0.62;
-  material.albedoColor = Color3.White();
+  const material = createTimberMaterial(scene, "track-mat");
   material.backFaceCulling = true;
-  material.environmentIntensity = 0.45;
   shell.material = material;
   shell.useVertexColors = true;
   shell.receiveShadows = true;
@@ -225,16 +214,6 @@ function floorFacesUp(
   const mid = ringStart + Math.floor(profileCount / 2);
   const n = new Vector3(normals[mid * 3], normals[mid * 3 + 1], normals[mid * 3 + 2]);
   return Vector3.Dot(n, frame.up) > 0;
-}
-
-/** Derives a track colour scheme from the seed, so every track looks its own. */
-export function derivePalette(hue: number): TrackPalette {
-  return {
-    floor: Color3.FromHSV(hue, 0.34, 0.55),
-    wall: Color3.FromHSV(hue, 0.42, 0.72),
-    underside: Color3.FromHSV(hue, 0.5, 0.24),
-    stripe: Color3.FromHSV((hue + 28) % 360, 0.3, 0.86),
-  };
 }
 
 /** Convenience for building Color4 without importing math.color everywhere. */

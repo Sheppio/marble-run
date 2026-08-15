@@ -7,7 +7,7 @@ import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
-import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
+import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder";
 import { HavokPlugin } from "@babylonjs/core/Physics/v2/Plugins/havokPlugin";
 import "@babylonjs/core/Physics/physicsEngineComponent";
 import "@babylonjs/core/Meshes/thinInstanceMesh";
@@ -16,10 +16,11 @@ import havokWasmUrl from "@babylonjs/havok/lib/esm/HavokPhysics.wasm?url";
 
 import { generateTrack } from "../track/generator";
 import { TrackGeometry } from "../track/geometry";
-import { buildTrackMesh, derivePalette, type TrackMeshes } from "../track/builder";
+import { buildTrackMesh, type TrackMeshes } from "../track/builder";
 import { buildObstacles, type ObstacleSet } from "../track/obstacles";
 import { hashSeed } from "../core/rng";
 import { createEnvironment, DEFAULT_SKY, type WorldLighting } from "../render/environment";
+import { createSurface, deriveTimberPalette } from "../render/materials";
 import { detectQuality, type QualitySettings } from "./quality";
 import { BroadcastCamera } from "./camera";
 import { Race, FIXED_STEP, type RaceEvents } from "./race";
@@ -33,6 +34,9 @@ import { GRAVITY, TRACK_CONSTANTS, type TrackPlan } from "../track/plan";
  * is far simpler to reason about than mutating a track in place, and on a
  * phone the whole build takes well under a second.
  */
+
+/** How far below the lowest point of the run its supporting surface sits. */
+const TABLE_DROP = 14;
 
 let havokInstance: unknown = null;
 
@@ -125,7 +129,7 @@ export class World {
     this.plan = generateTrack(options.seed);
     this.geometry = new TrackGeometry(this.plan);
 
-    const hue = hashSeed(`${options.seed}:palette`) % 360;
+    const paletteSeed = hashSeed(`${options.seed}:palette`);
     this.lighting = this.headless
       ? null
       : createEnvironment(this.scene, DEFAULT_SKY, {
@@ -133,7 +137,7 @@ export class World {
           shadowMapSize: this.quality.shadowMapSize,
         });
 
-    this.trackMeshes = buildTrackMesh(this.scene, this.geometry, derivePalette(hue));
+    this.trackMeshes = buildTrackMesh(this.scene, this.geometry, deriveTimberPalette(paletteSeed));
     this.obstacles = buildObstacles(
       this.scene,
       this.geometry,
@@ -141,6 +145,7 @@ export class World {
     );
 
     if (!this.headless) {
+      this.buildFloor();
       this.buildStartGate();
       this.buildFinishLine();
       if (this.quality.scenery) this.buildSupports();
@@ -185,12 +190,11 @@ export class World {
       { width: frame.width * 2.4, height: 4, depth: 0.4 },
       this.scene,
     );
-    const material = new PBRMaterial("gate-mat", this.scene);
-    material.albedoColor = Color3.FromHexString("#ff3d6e");
-    material.emissiveColor = Color3.FromHexString("#ff3d6e").scale(0.3);
-    material.metallic = 0.2;
-    material.roughness = 0.4;
-    gate.material = material;
+    gate.material = createSurface(this.scene, "gate-mat", Color3.FromHexString("#e8404f"), {
+      metallic: 0.1,
+      roughness: 0.35,
+      clearCoat: 0.5,
+    });
 
     const m = Matrix.Identity();
     Matrix.FromXYZAxesToRef(frame.right, frame.up, frame.tangent, m);
@@ -209,11 +213,12 @@ export class World {
     Matrix.FromXYZAxesToRef(frame.right, frame.up, frame.tangent, m);
     const rotation = Quaternion.FromRotationMatrix(m);
 
-    const bannerMaterial = new PBRMaterial("finish-mat", this.scene);
-    bannerMaterial.albedoColor = Color3.FromHexString("#f5f7ff");
-    bannerMaterial.emissiveColor = Color3.FromHexString("#8fd3ff").scale(0.35);
-    bannerMaterial.metallic = 0.1;
-    bannerMaterial.roughness = 0.5;
+    const bannerMaterial = createSurface(
+      this.scene,
+      "finish-mat",
+      Color3.FromHexString("#f2f4f8"),
+      { metallic: 0.15, roughness: 0.35, clearCoat: 0.4 },
+    );
 
     const width = frame.width * 2.6;
     for (const side of [-1, 1]) {
@@ -251,24 +256,23 @@ export class World {
   private buildSupports(): void {
     const pillar = CreateCylinder(
       "support",
-      { diameterTop: 0.5, diameterBottom: 1.1, height: 1, tessellation: 6 },
+      { diameterTop: 0.9, diameterBottom: 1.8, height: 1, tessellation: 8 },
       this.scene,
     );
-    const material = new PBRMaterial("support-mat", this.scene);
-    material.albedoColor = Color3.FromHexString("#39435c");
-    material.metallic = 0.4;
-    material.roughness = 0.65;
-    pillar.material = material;
+    pillar.material = createSurface(this.scene, "support-mat", Color3.FromHexString("#4a4038"), {
+      metallic: 0.15,
+      roughness: 0.6,
+    });
     pillar.isPickable = false;
 
     // Everything below the lowest point of the run is "the table".
     let tableY = Infinity;
     for (const frame of this.geometry.frames) tableY = Math.min(tableY, frame.position.y);
-    tableY -= 6;
+    tableY -= TABLE_DROP;
 
     const matrices: number[] = [];
     let count = 0;
-    for (let i = 6; i < this.geometry.frames.length - 6; i += 14) {
+    for (let i = 6; i < this.geometry.frames.length - 6; i += 26) {
       if (this.geometry.isInGap(i)) continue;
       const frame = this.geometry.frames[i];
       // Legs run down to the table the whole run stands on.
@@ -290,6 +294,31 @@ export class World {
     pillar.thinInstanceSetBuffer("matrix", new Float32Array(matrices), 16);
     pillar.thinInstanceRefreshBoundingInfo(false);
     this.decor.push(pillar);
+  }
+
+  /**
+   * The surface the run stands on.
+   *
+   * Without it the track floats in an empty sky, which reads as a diagram
+   * rather than an object. A plain ground plane catches the shadows of the run
+   * and its legs, and those shadows are most of what tells you how high above
+   * it any part of the track is.
+   */
+  private buildFloor(): void {
+    let lowest = Infinity;
+    for (const frame of this.geometry.frames) lowest = Math.min(lowest, frame.position.y);
+
+    const floor = CreateGround("floor", { width: 1600, height: 1600, subdivisions: 1 }, this.scene);
+    floor.position.y = lowest - TABLE_DROP;
+    floor.material = createSurface(this.scene, "floor-mat", Color3.FromHexString("#3b4a3f"), {
+      metallic: 0.0,
+      roughness: 0.95,
+      environmentIntensity: 0.35,
+    });
+    floor.receiveShadows = true;
+    floor.isPickable = false;
+    floor.freezeWorldMatrix();
+    this.decor.push(floor);
   }
 
   /** Frames the top of the track before the race starts. */

@@ -48,7 +48,10 @@ export function loadRoster(): string[] {
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return ["", ""];
     const names = parsed.filter((n): n is string => typeof n === "string").slice(0, MAX_PLAYERS);
-    return names.length >= MIN_PLAYERS ? names : ["", ""];
+    // Pad rather than discard: a saved roster of one name is still worth
+    // keeping, it just needs a second empty row alongside it.
+    while (names.length < MIN_PLAYERS) names.push("");
+    return names;
   } catch {
     return ["", ""];
   }

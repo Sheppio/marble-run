@@ -62,6 +62,7 @@ export class SetupScreen {
     this.addButton.addEventListener("click", () => {
       if (this.names.length >= MAX_PLAYERS) return;
       this.names.push("");
+      this.persist();
       this.renderRacers();
       // Focus the row we just added so a name can be typed straight away.
       const inputs = this.listNode.querySelectorAll<HTMLInputElement>("input");
@@ -181,6 +182,9 @@ export class SetupScreen {
       });
       input.addEventListener("input", () => {
         this.names[index] = input.value;
+        // Persist as they type. Saving only on "Start race" lost the roster
+        // to any reload, which is exactly when you most want it back.
+        this.persist();
       });
 
       const remove = el("button", {
@@ -192,6 +196,7 @@ export class SetupScreen {
       remove.disabled = this.names.length <= MIN_PLAYERS;
       remove.addEventListener("click", () => {
         this.names.splice(index, 1);
+        this.persist();
         this.renderRacers();
       });
 
@@ -201,6 +206,11 @@ export class SetupScreen {
     this.addButton.disabled = this.names.length >= MAX_PLAYERS;
     this.addButton.textContent =
       this.names.length >= MAX_PLAYERS ? `Maximum ${MAX_PLAYERS} racers` : "+ Add racer";
+  }
+
+  /** Remembers the roster for next time, blanks and all. */
+  private persist(): void {
+    saveRoster(this.names);
   }
 
   /** Debounced so typing a seed doesn't regenerate a track on every keystroke. */

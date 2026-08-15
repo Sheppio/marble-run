@@ -1,32 +1,32 @@
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
+import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
-import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
-import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import { PhysicsAggregate } from "@babylonjs/core/Physics/v2/physicsAggregate";
-import { PhysicsBody } from "@babylonjs/core/Physics/v2/physicsBody";
-import {
-  PhysicsShapeBox,
-  PhysicsShapeContainer,
-} from "@babylonjs/core/Physics/v2/physicsShape";
-import {
-  PhysicsMotionType,
-  PhysicsShapeType,
-} from "@babylonjs/core/Physics/v2/IPhysicsEnginePlugin";
+import { PhysicsShapeType } from "@babylonjs/core/Physics/v2/IPhysicsEnginePlugin";
+import type { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import type { Scene } from "@babylonjs/core/scene";
+import { createSurface } from "../render/materials";
 import type { TrackGeometry, TrackFrame } from "./geometry";
-import { GRAVITY, POINT_SPACING, TRACK_CONSTANTS, type ObstacleSpec } from "./plan";
+import { TRACK_CONSTANTS, type ObstacleSpec } from "./plan";
 
 /**
  * Obstacles.
  *
- * Moving parts are kinematic (ANIMATED) bodies driven directly from simulation
- * time rather than from forces or constraints. That keeps them perfectly
- * repeatable for a given seed — a spinner is at the same angle at the same
- * simulated moment on every device — while still shoving marbles around with
- * full collision response.
+ * All of them are static: fixed geometry bolted to the track, exactly as a
+ * wooden marble run has. Nothing spins, swings or opens on a timer.
+ *
+ * That is partly taste and partly physics. A kinematic obstacle pushes with
+ * effectively infinite force, so it can pin a marble against a wall in a way
+ * nothing recovers from; and at these speeds a marble carries so little
+ * momentum that a moving part tends to stop it dead rather than deflect it.
+ * Static shapes only ever redirect, which is what makes a run fun to watch.
+ *
+ * Layouts are regular — bowling-pin triangles, square grids, evenly spaced
+ * baffles — rather than randomly scattered. A regular pattern reads as
+ * something built on purpose; scattered pins read as noise.
  */
 
 export interface ForceZone {
@@ -44,52 +44,17 @@ export interface ObstacleSet {
   dispose(): void;
 }
 
-interface Animated {
-  body: PhysicsBody;
-  mesh: Mesh;
-  update(simTime: number): void;
-}
-
-/** One box in a compound shape: half-extents plus a local placement. */
-interface BoxPart {
-  extents: Vector3;
-  position: Vector3;
-  rotation: Quaternion;
-}
-
 /**
- * Builds a kinematic body whose collision shape is a set of boxes.
+ * Every obstacle must leave at least this much clear channel for a marble to
+ * get through — about half the channel, and three marbles side by side.
  *
- * Bladed obstacles have to be compound shapes: a convex hull of radial blades
- * is just a solid disc, which turns a spinner marbles are meant to slip past
- * into a wall that sweeps the channel.
+ * Generous on purpose. A field of six marbles arrives as a queue, not as one
+ * marble, and an obstacle that only lets them through single file turns into a
+ * traffic jam: the leaders squeeze past and everyone behind grinds to a halt.
  */
-function makeCompoundBody(
-  scene: Scene,
-  mesh: Mesh,
-  parts: BoxPart[],
-  physics: { restitution: number; friction: number },
-): PhysicsBody {
-  const container = new PhysicsShapeContainer(scene);
-  for (const part of parts) {
-    const box = new PhysicsShapeBox(Vector3.Zero(), Quaternion.Identity(), part.extents, scene);
-    container.addChild(box, part.position, part.rotation);
-  }
-  container.material = { friction: physics.friction, restitution: physics.restitution };
-
-  const body = new PhysicsBody(mesh, PhysicsMotionType.ANIMATED, false, scene);
-  body.shape = container;
-  return body;
-}
-
-/**
- * Every obstacle must leave at least this much clear channel somewhere across
- * its width — comfortably more than two marbles side by side, so a queue can
- * still get through. Anything tighter can wedge a marble permanently against a
- * wall, and a kinematic obstacle pinning a marble is unrecoverable, because it
- * pushes with infinite force.
- */
-const MIN_CLEAR_LANE = TRACK_CONSTANTS.marbleRadius * 3.6;
+const MIN_CLEAR_LANE = TRACK_CONSTANTS.marbleRadius * 5.0;
+/** Gap between neighbouring pins in a pattern, edge to edge. */
+const MIN_PIN_GAP = TRACK_CONSTANTS.marbleRadius * 3.4;
 
 /** Rotation carrying local axes onto the track frame at `frame`. */
 function frameRotation(frame: TrackFrame): Quaternion {
@@ -98,14 +63,57 @@ function frameRotation(frame: TrackFrame): Quaternion {
   return Quaternion.FromRotationMatrix(m);
 }
 
-function makeMaterial(scene: Scene, color: Color3, options: { metallic?: number; roughness?: number; glow?: number } = {}): PBRMaterial {
-  const mat = new PBRMaterial(`obs-${color.toHexString()}-${options.glow ?? 0}`, scene);
-  mat.albedoColor = color;
-  mat.metallic = options.metallic ?? 0.25;
-  mat.roughness = options.roughness ?? 0.45;
-  if (options.glow) mat.emissiveColor = color.scale(options.glow);
-  mat.environmentIntensity = 0.5;
-  return mat;
+/**
+ * A triangular prism standing on the channel floor, apex pointing back up the
+ * track so marbles arriving at it are split left or right.
+ *
+ * Built by hand rather than from a 3-sided cylinder, so the apex points
+ * exactly where intended rather than wherever the builder happened to start
+ * its first vertex.
+ */
+function createWedge(name: string, width: number, length: number, height: number, scene: Scene): Mesh {
+  const halfWidth = width / 2;
+  const halfLength = length / 2;
+
+  // Apex upstream at -Z; the flat back face downstream at +Z.
+  const footprint: Array<[number, number]> = [
+    [0, -halfLength],
+    [halfWidth, halfLength],
+    [-halfWidth, halfLength],
+  ];
+
+  const positions: number[] = [];
+  const indices: number[] = [];
+
+  // Bottom face, then top face.
+  for (const [x, z] of footprint) positions.push(x, 0, z);
+  for (const [x, z] of footprint) positions.push(x, height, z);
+  indices.push(0, 2, 1); // bottom, wound downward
+  indices.push(3, 4, 5); // top
+
+  // Three side walls.
+  for (let i = 0; i < 3; i++) {
+    const j = (i + 1) % 3;
+    indices.push(i, j, j + 3, i, j + 3, i + 3);
+  }
+
+  const mesh = new Mesh(name, scene);
+  const data = new VertexData();
+  data.positions = positions;
+  data.indices = indices;
+  const normals: number[] = [];
+  VertexData.ComputeNormals(positions, indices, normals);
+  data.normals = normals;
+  data.applyToMesh(mesh, false);
+  return mesh;
+}
+
+/** Lateral offsets for one row of a pattern, evenly spaced and centred. */
+function rowOffsets(count: number, usableHalfWidth: number): number[] {
+  if (count <= 0) return [];
+  if (count === 1) return [0];
+  const spacing = (usableHalfWidth * 2) / (count - 1);
+  return Array.from({ length: count }, (_, i) => -usableHalfWidth + i * spacing);
 }
 
 export function buildObstacles(
@@ -113,378 +121,204 @@ export function buildObstacles(
   geometry: TrackGeometry,
   specs: ObstacleSpec[],
 ): ObstacleSet {
-  const animated: Animated[] = [];
   const statics: PhysicsAggregate[] = [];
-  const decor: Mesh[] = [];
-  const zones: ForceZone[] = [];
   const shadowCasters: Mesh[] = [];
 
   const materials = {
-    hazard: makeMaterial(scene, Color3.FromHexString("#ff5c4d"), { metallic: 0.3, roughness: 0.35 }),
-    metal: makeMaterial(scene, Color3.FromHexString("#b9c4d6"), { metallic: 0.75, roughness: 0.3 }),
-    rubber: makeMaterial(scene, Color3.FromHexString("#2f3b52"), { metallic: 0.0, roughness: 0.85 }),
-    boost: makeMaterial(scene, Color3.FromHexString("#3ddc97"), { glow: 0.9, roughness: 0.3 }),
-    wind: makeMaterial(scene, Color3.FromHexString("#79c8ff"), { glow: 0.5, roughness: 0.4 }),
-    bumper: makeMaterial(scene, Color3.FromHexString("#ffcf3d"), { glow: 0.35, roughness: 0.4 }),
+    pin: makeMaterial(scene, "#c8d0dd", { metallic: 0.85, roughness: 0.22 }),
+    post: makeMaterial(scene, "#e0b14a", { metallic: 0.6, roughness: 0.3 }),
+    timber: makeMaterial(scene, "#7d4f2a", { metallic: 0.0, roughness: 0.72 }),
+    rubber: makeMaterial(scene, "#2c3446", { metallic: 0.0, roughness: 0.9 }),
   };
 
   const track = (index: number) => geometry.frameAt(index);
 
+  /** Merges a batch of meshes into one static body. */
+  const commit = (
+    parts: Mesh[],
+    material: PBRMaterial,
+    physics: { restitution: number; friction: number },
+  ) => {
+    if (parts.length === 0) return;
+    const merged = parts.length === 1 ? parts[0] : (Mesh.MergeMeshes(parts, true, true) as Mesh);
+    merged.material = material;
+    const aggregate = new PhysicsAggregate(
+      merged,
+      PhysicsShapeType.MESH,
+      { mass: 0, ...physics },
+      scene,
+    );
+    statics.push(aggregate);
+    shadowCasters.push(merged);
+  };
+
   for (const spec of specs) {
     const frame = track(spec.index);
-    const rot = frameRotation(frame);
     const p = spec.params;
 
     switch (spec.kind) {
-      case "spinner": {
-        // Radial paddles sweeping the channel around the track's up axis.
-        // Blade tips stop short of the walls, leaving a squeeze past either
-        // side; a spinner that swept the full channel would simply pin
-        // whatever it caught against the wall.
-        const bladeCount = Math.round(p.blades);
-        const halfReach = Math.max(0.8, frame.width - MIN_CLEAR_LANE);
-        const bladeHeight = 1.2;
-        const bladeThickness = 0.18;
-
-        const blades: Mesh[] = [];
-        const parts: BoxPart[] = [];
-        for (let i = 0; i < bladeCount; i++) {
-          const angle = (i / bladeCount) * Math.PI * 2;
-          const blade = CreateBox(
-            "blade",
-            { width: halfReach * 2, height: bladeHeight, depth: bladeThickness * 2 },
-            scene,
-          );
-          blade.rotation.y = angle;
-          blade.bakeCurrentTransformIntoVertices();
-          blades.push(blade);
-          parts.push({
-            extents: new Vector3(halfReach * 2, bladeHeight, bladeThickness * 2),
-            position: Vector3.Zero(),
-            rotation: Quaternion.RotationAxis(new Vector3(0, 1, 0), angle),
-          });
-        }
-        const merged = Mesh.MergeMeshes(blades, true, true) as Mesh;
-        merged.material = materials.hazard;
-        // Sit the blades so they strike the upper half of a marble. Sweeping
-        // at floor level lets a kinematic paddle press a marble into the
-        // channel and hold it there, which nothing can recover from.
-        merged.position = frame.position.add(
-          frame.up.scale(TRACK_CONSTANTS.marbleRadius * 1.5 + bladeHeight * 0.5),
-        );
-        merged.rotationQuaternion = rot.clone();
-
-        const body = makeCompoundBody(scene, merged, parts, { restitution: 0.35, friction: 0.2 });
-        const basePos = merged.position.clone();
-        const spinAxis = frame.up.clone();
-        animated.push({
-          body,
-          mesh: merged,
-          update(simTime) {
-            const angle = p.phase + simTime * p.speed * Math.PI;
-            const spin = Quaternion.RotationAxis(spinAxis, angle);
-            body.setTargetTransform(basePos, spin.multiply(rot));
-          },
-        });
-        shadowCasters.push(merged);
-        break;
-      }
-
-      case "pendulum": {
-        // A weight on an arm, pivoting on an axis across the channel.
-        const arm = CreateBox("arm", { width: 0.3, height: 5.5, depth: 0.3 }, scene);
-        arm.position.y = -2.75;
-        arm.bakeCurrentTransformIntoVertices();
-        const weight = CreateSphere("weight", { diameter: 2.2, segments: 10 }, scene);
-        weight.position.y = -5.5;
-        weight.bakeCurrentTransformIntoVertices();
-        const merged = Mesh.MergeMeshes([arm, weight], true, true) as Mesh;
-        merged.material = materials.metal;
-
-        const pivot = frame.position.add(frame.up.scale(7.2));
-        merged.position = pivot.clone();
-        merged.rotationQuaternion = rot.clone();
-
-        const aggregate = new PhysicsAggregate(
-          merged,
-          PhysicsShapeType.CONVEX_HULL,
-          { mass: 1, restitution: 0.5, friction: 0.2 },
-          scene,
-        );
-        aggregate.body.setMotionType(PhysicsMotionType.ANIMATED);
-
-        const swingAxis = frame.tangent.clone();
-        animated.push({
-          body: aggregate.body,
-          mesh: merged,
-          update(simTime) {
-            const angle = Math.sin((simTime / p.period) * Math.PI * 2 + p.phase) * p.swing;
-            const swing = Quaternion.RotationAxis(swingAxis, angle);
-            aggregate.body.setTargetTransform(pivot, swing.multiply(rot));
-          },
-        });
-        shadowCasters.push(merged);
-        break;
-      }
-
-      case "drum": {
-        // Paddle wheel on an axle across the track — marbles pass between
-        // blades. Compound boxes again, for the same reason as the spinner,
-        // and because Havok does not simulate a moving concave mesh reliably.
-        const slots = Math.round(p.slots);
-        const bladeDepth = 3.4;
-        const bladeHeight = 3.6;
-        const bladeThickness = 0.22;
-
-        const blades: Mesh[] = [];
-        const parts: BoxPart[] = [];
-        for (let i = 0; i < slots; i++) {
-          const angle = (i / slots) * Math.PI * 2;
-          const blade = CreateBox(
-            "dblade",
-            { width: bladeThickness * 2, height: bladeHeight, depth: bladeDepth },
-            scene,
-          );
-          blade.rotation.x = angle;
-          blade.bakeCurrentTransformIntoVertices();
-          blades.push(blade);
-          parts.push({
-            extents: new Vector3(bladeThickness * 2, bladeHeight, bladeDepth),
-            position: Vector3.Zero(),
-            rotation: Quaternion.RotationAxis(new Vector3(1, 0, 0), angle),
-          });
-        }
-        const merged = Mesh.MergeMeshes(blades, true, true) as Mesh;
-        merged.material = materials.hazard;
-        merged.position = frame.position.add(frame.up.scale(1.5));
-        merged.rotationQuaternion = rot.clone();
-
-        const body = makeCompoundBody(scene, merged, parts, { restitution: 0.3, friction: 0.25 });
-        const basePos = merged.position.clone();
-        const axle = frame.right.clone();
-        animated.push({
-          body,
-          mesh: merged,
-          update(simTime) {
-            const spin = Quaternion.RotationAxis(axle, simTime * p.speed * Math.PI);
-            body.setTargetTransform(basePos, spin.multiply(rot));
-          },
-        });
-        shadowCasters.push(merged);
-        break;
-      }
-
-      case "gate": {
-        // A barrier that swings out of the way on a fixed cycle.
-        // Hinged at one wall and stopping short of the other, so the gate
-        // redirects traffic rather than sealing the channel shut.
-        const side = p.leaves > 1.5 ? 1 : -1;
-        const width = Math.max(1.2, frame.width * 2 - MIN_CLEAR_LANE);
-        const gate = CreateBox("gate", { width, height: 2.5, depth: 0.4 }, scene);
-        gate.material = materials.rubber;
-        const pivot = frame.position
-          .add(frame.up.scale(1.25))
-          .add(frame.right.scale(side * frame.width))
-          .add(frame.right.scale(-side * width * 0.5));
-        gate.position = pivot.clone();
-        gate.rotationQuaternion = rot.clone();
-
-        const aggregate = new PhysicsAggregate(
-          gate,
-          PhysicsShapeType.BOX,
-          { mass: 1, restitution: 0.2, friction: 0.4 },
-          scene,
-        );
-        aggregate.body.setMotionType(PhysicsMotionType.ANIMATED);
-
-        const hingeAxis = frame.up.clone();
-        animated.push({
-          body: aggregate.body,
-          mesh: gate,
-          update(simTime) {
-            // Smoothly held open, then shut: a shaped sine rather than a flat cycle.
-            const cycle = Math.sin((simTime / p.period) * Math.PI * 2 + p.phase);
-            const open = Math.sign(cycle) * Math.pow(Math.abs(cycle), 0.4);
-            const swing = Quaternion.RotationAxis(hingeAxis, open * 0.85);
-            aggregate.body.setTargetTransform(pivot, swing.multiply(rot));
-          },
-        });
-        shadowCasters.push(gate);
-        break;
-      }
-
-      case "pegs": {
-        // Pachinko: staggered rows of posts in a widened section.
-        const posts: Mesh[] = [];
+      case "pins": {
+        // A regular field of pins: either a bowling triangle or a square grid.
+        const isTriangle = p.pattern < 0.5;
+        const diameter = 0.75;
+        const height = 2.4;
         const rows = Math.round(p.rows);
-        const pegDiameter = 0.7;
+        const rowGap = 3.2;
+
+        const parts: Mesh[] = [];
         for (let r = 0; r < rows; r++) {
-          const rowFrame = track(spec.index - (rows * 2.4) / 2 + r * 2.4);
-          const stagger = (r % 2) * p.stagger;
-          // Fit as many pegs across as still leaves marble-width lanes between
-          // them, rather than trusting a hard-coded count to suit every width.
-          const span = rowFrame.width * 1.7;
-          const perRow = Math.max(
+          const rowFrame = track(spec.index - ((rows - 1) * rowGap) / 2 + r * rowGap);
+          // Bowling: one pin in the front row, growing by one each row back.
+          // Grid: the same count in every row.
+          const wanted = isTriangle ? r + 1 : Math.round(p.columns);
+
+          // How many pins fit while leaving a marble-width gap between every
+          // pair *and* between the outermost pins and the walls. Counting only
+          // the gaps between pins is the trap: it packs the outer pins hard
+          // against the walls, and a marble wedges in the slot that leaves.
+          const span = rowFrame.width * 2;
+          const maxCount = Math.max(
             1,
-            Math.min(
-              Math.round(p.perRow),
-              Math.floor((span - MIN_CLEAR_LANE) / (pegDiameter + MIN_CLEAR_LANE)),
-            ),
+            Math.floor((span - MIN_PIN_GAP) / (diameter + MIN_PIN_GAP)),
           );
-          for (let c = 0; c < perRow; c++) {
-            const lateral =
-              ((c + 0.5) / perRow - 0.5) * span + stagger * rowFrame.width * 0.3;
-            const post = CreateCylinder(
-              "peg",
-              { diameter: pegDiameter, height: 2.2, tessellation: 8 },
+          const count = Math.min(wanted, maxCount);
+          const usable = Math.max(0, rowFrame.width - MIN_PIN_GAP - diameter * 0.5);
+
+          for (const lateral of rowOffsets(count, usable)) {
+            const pin = CreateCylinder(
+              "pin",
+              { diameterTop: diameter * 0.72, diameterBottom: diameter, height, tessellation: 10 },
               scene,
             );
-            post.rotationQuaternion = frameRotation(rowFrame);
-            post.position = rowFrame.position
+            pin.rotationQuaternion = frameRotation(rowFrame);
+            pin.position = rowFrame.position
               .add(rowFrame.right.scale(lateral))
-              .add(rowFrame.up.scale(1.1));
-            posts.push(post);
+              .add(rowFrame.up.scale(height / 2));
+            parts.push(pin);
           }
         }
-        const merged = Mesh.MergeMeshes(posts, true, true) as Mesh;
-        merged.material = materials.metal;
-        const aggregate = new PhysicsAggregate(
-          merged,
-          PhysicsShapeType.MESH,
-          { mass: 0, restitution: 0.42, friction: 0.2 },
-          scene,
-        );
-        statics.push(aggregate);
-        shadowCasters.push(merged);
+        commit(parts, materials.pin, { restitution: 0.4, friction: 0.15 });
         break;
       }
 
-      case "bumpers": {
-        // Springy posts that fling marbles sideways.
-        const posts: Mesh[] = [];
+      case "wedge": {
+        // Splits the field left and right. Sized so each side is a real lane.
+        const length = 5.5;
+        const height = 2.2;
+        // Each side of the wedge has to be a lane in its own right.
+        const width = Math.max(1.2, Math.min(frame.width * 0.55, frame.width * 2 - MIN_CLEAR_LANE));
+        const wedge = createWedge("wedge", width, length, height, scene);
+        wedge.rotationQuaternion = frameRotation(frame);
+        wedge.position = frame.position.add(frame.right.scale(p.offset * frame.width * 0.3));
+        commit([wedge], materials.timber, { restitution: 0.2, friction: 0.3 });
+        break;
+      }
+
+      case "baffles": {
+        // Short walls from alternating sides, so the run has to weave. Each
+        // one leaves a clear lane past its tip, and is angled downstream so a
+        // marble is deflected along it rather than stopped by it.
         const count = Math.round(p.count);
+        const spacing = 5.5;
+        const thickness = 0.7;
+        const height = 2.2;
+
+        const parts: Mesh[] = [];
         for (let i = 0; i < count; i++) {
-          const f = track(spec.index - (count * 3.2) / 2 + i * 3.2);
-          // Keep a clear lane either side, so a bumper deflects a marble
-          // rather than wedging it against the wall.
-          const maxOffset = Math.max(0, f.width - MIN_CLEAR_LANE * 0.75);
-          const lateral = (i % 2 === 0 ? -1 : 1) * Math.min(f.width * 0.45, maxOffset);
+          const f = track(spec.index - ((count - 1) * spacing) / 2 + i * spacing);
+          const side = i % 2 === 0 ? -1 : 1;
+          // Reaches across at most half the channel, so the lane past its tip
+          // is always wide enough for several marbles to stream through.
+          const reach = Math.max(1.0, Math.min(f.width * 0.55, f.width * 2 - MIN_CLEAR_LANE));
+          const baffle = CreateBox(
+            "baffle",
+            { width: reach, height, depth: thickness },
+            scene,
+          );
+          // Angled to present a guiding face to oncoming marbles. The lean is
+          // measured, not assumed: leaning it the other way was tried and made
+          // things markedly worse, roughly doubling the number of marbles that
+          // came to rest against one.
+          baffle.rotationQuaternion = Quaternion.RotationAxis(
+            new Vector3(0, 1, 0),
+            side * 0.3,
+          ).multiply(frameRotation(f));
+          baffle.position = f.position
+            .add(f.right.scale(side * (f.width - reach / 2)))
+            .add(f.up.scale(height / 2));
+          parts.push(baffle);
+        }
+        commit(parts, materials.rubber, { restitution: 0.25, friction: 0.35 });
+        break;
+      }
+
+      case "posts": {
+        // A short row of stouter posts straight down the middle of the channel.
+        const count = Math.round(p.count);
+        const spacing = 4.0;
+        const diameter = 1.5;
+        const height = 2.2;
+
+        const parts: Mesh[] = [];
+        for (let i = 0; i < count; i++) {
+          const f = track(spec.index - ((count - 1) * spacing) / 2 + i * spacing);
+          // Same rule as the pins: never leave a slot against the wall that a
+          // marble can wedge into.
+          const usable = Math.max(0, f.width - MIN_PIN_GAP - diameter * 0.5);
+          // Alternate side to side, in step, rather than at random.
+          const lateral = (i % 2 === 0 ? -1 : 1) * usable * p.spread;
           const post = CreateCylinder(
-            "bumper",
-            { diameter: 1.1, height: 2.1, tessellation: 12 },
+            "post",
+            { diameter, height, tessellation: 14 },
             scene,
           );
           post.rotationQuaternion = frameRotation(f);
-          post.position = f.position.add(f.right.scale(lateral)).add(f.up.scale(1.05));
-          posts.push(post);
+          post.position = f.position
+            .add(f.right.scale(lateral))
+            .add(f.up.scale(height / 2));
+          parts.push(post);
         }
-        const merged = Mesh.MergeMeshes(posts, true, true) as Mesh;
-        merged.material = materials.bumper;
-        const aggregate = new PhysicsAggregate(
-          merged,
-          PhysicsShapeType.MESH,
-          // Capped well below 1: an over-bouncy post throws marbles backwards
-          // up the track, where they oscillate instead of racing.
-          { mass: 0, restitution: Math.min(0.62, p.bounce), friction: 0.12 },
-          scene,
-        );
-        statics.push(aggregate);
-        shadowCasters.push(merged);
+        commit(parts, materials.post, { restitution: 0.45, friction: 0.15 });
         break;
       }
 
       case "divider": {
-        // An island splitting the channel — pick a side and hope.
+        // An island splitting the channel into two lanes for a while.
         const segments = Math.max(2, Math.round(p.length / 3));
-        const walls: Mesh[] = [];
+        const parts: Mesh[] = [];
         for (let i = 0; i < segments; i++) {
           const f = track(spec.index - segments * 0.75 + i * 1.5);
-          const wall = CreateBox("divider", { width: 0.55, height: 2.3, depth: 3.2 }, scene);
+          const wall = CreateBox("divider", { width: 0.6, height: 2.2, depth: 1.6 }, scene);
           wall.rotationQuaternion = frameRotation(f);
           wall.position = f.position
             .add(f.right.scale(p.offset * f.width))
-            .add(f.up.scale(1.15));
-          walls.push(wall);
+            .add(f.up.scale(1.1));
+          parts.push(wall);
         }
-        const merged = Mesh.MergeMeshes(walls, true, true) as Mesh;
-        merged.material = materials.rubber;
-        const aggregate = new PhysicsAggregate(
-          merged,
-          PhysicsShapeType.MESH,
-          { mass: 0, restitution: 0.2, friction: 0.35 },
-          scene,
-        );
-        statics.push(aggregate);
-        shadowCasters.push(merged);
-        break;
-      }
-
-      case "boost": {
-        const span = Math.max(2, Math.round(p.length / POINT_SPACING));
-        const from = spec.index - span / 2;
-        const to = spec.index + span / 2;
-        // Visual pad only — the push comes from the force zone.
-        for (let i = 0; i < span; i++) {
-          const f = track(from + i);
-          const pad = CreateBox("boost-pad", { width: f.width * 1.7, height: 0.1, depth: POINT_SPACING }, scene);
-          pad.rotationQuaternion = frameRotation(f);
-          pad.position = f.position.add(f.up.scale(0.06));
-          pad.material = materials.boost;
-          pad.isPickable = false;
-          decor.push(pad);
-        }
-        zones.push({
-          from,
-          to,
-          // `strength` is in g, so the shove keeps its meaning at any scale.
-          force: (f) => f.tangent.scale(p.strength * GRAVITY),
-        });
-        break;
-      }
-
-      case "fan": {
-        const span = Math.max(2, Math.round(p.length / POINT_SPACING));
-        const from = spec.index - span / 2;
-        const to = spec.index + span / 2;
-        for (let i = 0; i < span; i += 2) {
-          const f = track(from + i);
-          const vane = CreateBox("vane", { width: 0.3, height: 1.8, depth: 1.8 }, scene);
-          vane.rotationQuaternion = frameRotation(f);
-          vane.position = f.position
-            .add(f.right.scale(Math.sign(p.strength) * f.width * 1.25))
-            .add(f.up.scale(1.4));
-          vane.material = materials.wind;
-          vane.isPickable = false;
-          decor.push(vane);
-        }
-        zones.push({
-          from,
-          to,
-          force: (f) => f.right.scale(-p.strength * GRAVITY),
-        });
+        commit(parts, materials.timber, { restitution: 0.2, friction: 0.35 });
         break;
       }
     }
   }
 
-  for (const m of decor) m.freezeWorldMatrix();
-
   return {
-    zones,
+    // Nothing here moves, so there is nothing to advance.
+    zones: [],
     shadowCasters,
-    update(simTime) {
-      for (const a of animated) a.update(simTime);
-    },
+    update() {},
     dispose() {
-      for (const a of animated) {
-        a.body.dispose();
-        a.mesh.dispose();
-      }
       for (const s of statics) {
         s.transformNode.dispose();
         s.dispose();
       }
-      for (const d of decor) d.dispose();
     },
   };
+}
+
+function makeMaterial(
+  scene: Scene,
+  hex: string,
+  options: { metallic: number; roughness: number },
+): PBRMaterial {
+  return createSurface(scene, `obstacle-${hex}`, Color3.FromHexString(hex), options);
 }

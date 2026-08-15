@@ -41,9 +41,14 @@ ten to eighteen metres of track, dropping a metre or so overall.
 That scale is not decoration — it is what sets the speed. A rolling sphere that
 has descended a height `h` is travelling at `v = √(2·g·h·5/7)`, so a run's top
 speed follows from its total drop and nothing else. Marbles here flow at around
-**0.5 m/s** and touch about **1.1 m/s** on the steeper drops, which is what a
+**0.4 m/s** and touch about **0.7 m/s** on the steeper drops, which is what a
 marble on a wooden run actually does. Building the same track at fairground
 scale would have them doing 60km/h whether that was wanted or not.
+
+Speed is set by the drag ceiling rather than by flattening the track. Slackening
+the gradient instead looks like the same thing and is not: the track has a
+minimum slope it must keep to guarantee a resting marble rolls away, and pushing
+the whole run down onto that floor left marbles stalling everywhere.
 
 Two properties are guaranteed rather than hoped for:
 
@@ -88,10 +93,20 @@ sections. There are deliberately no helical shapes: a spiral only works if the
 run may cross over itself, and laid out flat its second turn lands on its
 first.
 
-Obstacles are spinners, wrecking balls, pachinko fields, bumpers, timed gates,
-boost pads, lane dividers, rolling drums and crosswind zones. Moving ones are
-kinematic and driven from simulated time, so they are in the same place at the
-same moment on every device.
+Obstacles are all static — pin fields, splitter wedges, weaving baffles, post
+rows and lane dividers — and laid out in regular patterns: bowling triangles,
+square grids, evenly spaced rows. Nothing spins, swings or opens on a timer.
+
+Moving parts were built and then removed. A kinematic obstacle pushes with
+effectively infinite force, so it can pin a marble against a wall in a way
+nothing recovers from, and at these speeds a marble carries so little momentum
+that a moving part stops it dead rather than deflecting it. Static shapes only
+redirect.
+
+Every obstacle leaves a clear lane of about half the channel. That sounds
+generous until you remember a field of six marbles arrives as a queue: an
+obstacle that lets them through single file becomes a traffic jam, and
+tightening the lanes by a centimetre took the finish rate from 93% to 71%.
 
 ## Tuning and diagnostics
 
@@ -117,9 +132,9 @@ actually made.
 Marbles that fall out of the channel, wedge themselves, or spend too long
 getting nowhere are put back on the track. This is a safety net, not a
 simulation shortcut: a race that cannot finish is worse than one with a
-blemish. Around 88% of marbles finish without any intervention at all, at
-roughly two or three interventions per race across the whole field, and the
-harness reports the rate so that regressions are visible.
+blemish. Around 93% of marbles finish without any intervention, at roughly
+five interventions per race across the whole field, and the harness reports
+the rate so that regressions are visible.
 
 ## Deployment
 

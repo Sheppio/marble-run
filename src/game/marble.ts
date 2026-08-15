@@ -2,7 +2,6 @@ import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
-import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import { PhysicsAggregate } from "@babylonjs/core/Physics/v2/physicsAggregate";
 import {
   PhysicsMotionType,
@@ -10,6 +9,7 @@ import {
 } from "@babylonjs/core/Physics/v2/IPhysicsEnginePlugin";
 import type { Scene } from "@babylonjs/core/scene";
 import { TRACK_CONSTANTS } from "../track/plan";
+import { createMarbleMaterial } from "../render/materials";
 
 export interface Player {
   id: number;
@@ -96,22 +96,17 @@ export class Marble {
   ) {
     this.mesh = CreateSphere(
       `marble-${player.id}`,
-      { diameter: MARBLE.radius * 2, segments: 12 },
+      { diameter: MARBLE.radius * 2, segments: 16 },
       scene,
     );
     this.mesh.position.copyFrom(position);
     this.mesh.isPickable = false;
 
-    const color = Color3.FromHexString(player.color);
-    const material = new PBRMaterial(`marble-mat-${player.id}`, scene);
-    material.albedoColor = color;
-    material.metallic = 0.15;
-    material.roughness = 0.06;
-    material.environmentIntensity = 1.0;
-    // A touch of self-illumination keeps every marble readable against a dark
-    // track, even the ones in shadow at the back of the pack.
-    material.emissiveColor = color.scale(0.16);
-    this.mesh.material = material;
+    this.mesh.material = createMarbleMaterial(
+      scene,
+      `marble-mat-${player.id}`,
+      Color3.FromHexString(player.color),
+    );
 
     this.aggregate = new PhysicsAggregate(
       this.mesh,
