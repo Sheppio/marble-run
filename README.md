@@ -113,9 +113,15 @@ rate so that regressions are visible.
 
 ## Deployment
 
-Pushing to the development branch builds the site and publishes it to GitHub
-Pages via `.github/workflows/deploy.yml`. The build sets Vite's `base` from the
+Pushing to `main` builds the site and publishes it to GitHub Pages via
+`.github/workflows/deploy.yml`. The build sets Vite's `base` from the
 repository name so it works under a project path.
+
+Pages must be set to deploy from GitHub Actions (Settings → Pages → Source).
+Note that the `github-pages` environment restricts deployments to the default
+branch, so a deploy from any other branch is rejected before the job starts —
+it fails in about a second having run no steps at all, which is a confusing
+signature the first time you meet it.
 
 ## Layout
 

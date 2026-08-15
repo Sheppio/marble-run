@@ -3,7 +3,7 @@ name: Build and deploy
 on:
   push:
     branches:
-      - claude/marble-run-race-game-rnbleg
+      - main
   workflow_dispatch:
 
 # Allow one concurrent deployment, and let a newer push supersede a running one.
