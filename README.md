@@ -35,8 +35,8 @@ can run the identical track on their own phones.
 ## The physical model
 
 The run is modelled as an actual marble run, at the size one would really be:
-16mm glass marbles in a channel about 7cm wide, seven to fifteen metres of
-track, dropping half a metre or so overall.
+16mm glass marbles in a flat-bottomed channel about 7cm wide with 2cm walls,
+ten to eighteen metres of track, dropping a metre or so overall.
 
 That scale is not decoration — it is what sets the speed. A rolling sphere that
 has descended a height `h` is travelling at `v = √(2·g·h·5/7)`, so a run's top
@@ -49,7 +49,12 @@ Two properties are guaranteed rather than hoped for:
 
 - **The track runs downhill everywhere.** A marble set down at rest anywhere on
   it will start rolling towards the finish. This is enforced structurally after
-  the centreline is generated, and verified by simulation (`npm run test:rest`).
+  the centreline is generated — a pass that only ever moves points downward, so
+  every step descends by at least what a stationary marble needs to move off —
+  and verified by simulation (`npm run test:rest`).
+- **The run never passes over or under itself.** It loses height by spreading
+  across the ground, the way a path descends a hillside, rather than by
+  stacking loops. Stacked runs are hard to film and hard to read.
 - **The same seed gives the same race.** The simulation runs on a fixed
   timestep with catch-up, so the result does not depend on the device's frame
   rate.
@@ -73,10 +78,15 @@ another:
 | Feature | Sized from |
 | --- | --- |
 | Corner radius | Speed there, capped at 1.15g of cornering |
-| Banking, wall height | Cornering force the corner will actually produce |
-| Wave amplitude | Speed and wavelength, so marbles never leave the crest |
-| Jump gap length | Ballistic range at the speed marbles arrive with |
+| Banking | Cornering force the corner will actually produce |
+| Wave amplitude | Speed and wavelength, so marbles never leave the crest, and the segment's own gradient, so troughs never climb |
+| Minimum gradient | Rolling resistance, so a resting marble always moves off |
 | Obstacle lane widths | Marble diameter, so nothing can wedge a marble |
+
+Segments are straights, turns, chicanes, drops, undulations and widened
+sections. There are deliberately no helical shapes: a spiral only works if the
+run may cross over itself, and laid out flat its second turn lands on its
+first.
 
 Obstacles are spinners, wrecking balls, pachinko fields, bumpers, timed gates,
 boost pads, lane dividers, rolling drums and crosswind zones. Moving ones are
@@ -94,7 +104,6 @@ npm run test:smoke     # end-to-end: renders, races, and reproduces a seed
 npm run test:rest      # the "downhill everywhere" invariant
 npm run tune           # finish rates, rescue causes, flow speeds
 npm run tune:flow      # sweeps gradient against rolling resistance
-npm run tune:channel   # sweeps channel width against rim geometry
 npm run tune:escapes   # classifies how marbles leave the channel
 ```
 
@@ -108,8 +117,9 @@ actually made.
 Marbles that fall out of the channel, wedge themselves, or spend too long
 getting nowhere are put back on the track. This is a safety net, not a
 simulation shortcut: a race that cannot finish is worse than one with a
-blemish. Roughly 95% of marbles finish cleanly, and the harness reports the
-rate so that regressions are visible.
+blemish. Around 88% of marbles finish without any intervention at all, at
+roughly two or three interventions per race across the whole field, and the
+harness reports the rate so that regressions are visible.
 
 ## Deployment
 

@@ -13,7 +13,6 @@
     "test:rest": "node scripts/rest-test.mjs",
     "tune": "node scripts/tune.mjs",
     "tune:flow": "node scripts/flow-sweep.mjs",
-    "tune:channel": "node scripts/channel-sweep.mjs",
     "tune:escapes": "node scripts/departures.mjs"
   },
   "dependencies": {

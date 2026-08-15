@@ -147,30 +147,14 @@ export const TRACK_CONSTANTS = {
    * and spinner, because none of them could get past another.
    */
   baseWidth: 3.6,
-  /**
-   * How far the side walls rise above the channel floor — nearly two and a
-   * half marble diameters. A deep open channel, rather than a shallow one
-   * with an overhanging lip: it contains marbles just as well and leaves the
-   * race visible from every angle.
-   */
-  wallHeight: 4.4,
+  /** Height of the side walls above the flat floor. */
+  wallHeight: 2.0,
   /**
    * Thickness of the track shell.
    *
    * Sized against the distance a marble covers between collision checks. At
    * 1.4 m/s and a 1/240s step that is 0.6cm, so anything thinner than this
-   * lets a marble arriving fast off a jump punch straight through the floor.
+   * lets a fast marble punch straight through the floor between steps.
    */
   shellThickness: 1.2,
-  /** Radius of the rounded floor of the channel. */
-  filletRadius: 1.8,
-  /**
-   * The rounded top edge of the wall, as a fraction of the local half-width,
-   * and how far round it turns. At 90° this is a finished rim with no
-   * overhang, which is what an open channel wants: at these speeds marbles
-   * have no tendency to climb the walls, so there is nothing to catch.
-   */
-  lipFraction: 0.26,
-  lipMaxRadius: 1.2,
-  lipSweepDegrees: 90,
 };

@@ -18,12 +18,8 @@ import type { TrackGeometry } from "./geometry";
  * single-sided ribbon would let fast marbles clip straight through the floor.
  */
 
-/** Points per fillet corner in the cross-section. */
-const FILLET_STEPS = 5;
-/** Points along each overhanging lip. */
-const LIP_STEPS = 4;
-
-
+/** Chamfer at the floor-to-wall joint, in cm. */
+const FLOOR_CHAMFER = 0.35;
 
 interface Profile {
   /** Lateral offsets, metres from the channel centre. */
@@ -33,69 +29,31 @@ interface Profile {
 }
 
 /**
- * The channel cross-section, from the tip of the left lip, round the floor, to
- * the tip of the right lip.
+ * The channel cross-section: a flat floor with a vertical wall up each side.
  *
- * The lip is the important part. A vertical wall cannot be climbed by
- * cornering force alone, but the rounded floor turns sideways velocity into
- * upward velocity — it works as a launch ramp — and marbles were riding up the
- * wall and flying out over the top. A lip that curls back over the channel
- * catches them and returns them to the floor, which is exactly what the
- * overhang on a bobsleigh curve is for.
+ * Deliberately plain. Earlier versions rounded the floor and curled the top of
+ * the walls inward, which contained marbles well but read as a tube rather
+ * than a track, and the curved floor funnelled every marble into the middle so
+ * the field never spread out. A flat bottom lets marbles run side by side and
+ * makes the racing legible.
  *
- * `expand` offsets the whole section outward to produce the outer surface of
- * the shell; both surfaces share the lip's arc centre so the lip keeps an even
- * thickness all the way round.
+ * `expand` offsets the section outward to produce the outer surface of the
+ * shell, so the two sweep together into a solid.
  */
 function buildProfile(halfWidth: number, wallHeight: number, expand: number): Profile {
   const w = halfWidth + expand;
-  const filletRadius = Math.min(TRACK_CONSTANTS.filletRadius + expand, w * 0.92);
   const floorY = -expand;
-  const flat = Math.max(0, w - filletRadius);
+  // A small chamfer where the floor meets the wall. The floor still reads as
+  // flat — this is under half a marble radius — but a hard 90° internal corner
+  // grips a marble between its two faces and can hold it against a gradient
+  // that would otherwise roll it away.
+  const c = FLOOR_CHAMFER;
 
-  // Sized from the inner half-width so inner and outer profiles agree.
-  const lipRadius = Math.min(TRACK_CONSTANTS.lipMaxRadius, halfWidth * TRACK_CONSTANTS.lipFraction);
-  const lipCentreX = -halfWidth + lipRadius;
-  const lipCentreY = wallHeight - lipRadius;
-  const lipSweepRadius = lipRadius + expand;
-  const lipSweep = (TRACK_CONSTANTS.lipSweepDegrees * Math.PI) / 180;
-
-  const x: number[] = [];
-  const y: number[] = [];
-
-  // Left lip: from the overhanging tip back down to where the wall starts.
-  for (let i = LIP_STEPS; i >= 0; i--) {
-    const a = (i / LIP_STEPS) * lipSweep;
-    x.push(lipCentreX - Math.cos(a) * lipSweepRadius);
-    y.push(lipCentreY + Math.sin(a) * lipSweepRadius);
-  }
-
-  // Left fillet, from the foot of the wall round to the flat floor.
-  for (let i = 0; i <= FILLET_STEPS; i++) {
-    const a = (i / FILLET_STEPS) * (Math.PI / 2); // 0 → vertical, π/2 → horizontal
-    x.push(-flat - Math.cos(a) * filletRadius);
-    y.push(floorY + filletRadius - Math.sin(a) * filletRadius);
-  }
-
-  // Floor centre. Always emitted, even when the fillets meet in the middle, so
-  // that every ring has an identical vertex count — the sweep indexes rings by
-  // a fixed stride and a short ring would corrupt the whole mesh.
-  x.push(0);
-  y.push(floorY);
-
-  for (let i = FILLET_STEPS; i >= 0; i--) {
-    const a = (i / FILLET_STEPS) * (Math.PI / 2);
-    x.push(flat + Math.cos(a) * filletRadius);
-    y.push(floorY + filletRadius - Math.sin(a) * filletRadius);
-  }
-
-  for (let i = 0; i <= LIP_STEPS; i++) {
-    const a = (i / LIP_STEPS) * lipSweep;
-    x.push(-lipCentreX + Math.cos(a) * lipSweepRadius);
-    y.push(lipCentreY + Math.sin(a) * lipSweepRadius);
-  }
-
-  return { x, y };
+  // Left wall top, down the chamfer, across the floor, and up the right wall.
+  return {
+    x: [-w, -w, -w + c, w - c, w, w],
+    y: [wallHeight, floorY + c, floorY, floorY, floorY + c, wallHeight],
+  };
 }
 
 export interface TrackMeshes {
@@ -153,9 +111,8 @@ export function buildTrackMesh(
         .add(frame.up.scale(py));
       positions.push(p.x, p.y, p.z);
 
-      // The lip and upper wall read as one band; everything below is floor.
-      const lipBand = LIP_STEPS + 1;
-      const onWall = profileIndex < lipBand || profileIndex >= profileCount - lipBand;
+      // The outer two points on each side are wall; the rest is floor.
+      const onWall = profileIndex < 2 || profileIndex >= profileCount - 2;
       let c: Color3;
       if (isOuter) c = palette.underside;
       else if (onWall) c = palette.wall;

@@ -38,27 +38,31 @@ interface RawPoint {
   gap: boolean;
 }
 
+/**
+ * Segment kinds.
+ *
+ * There are deliberately no helical shapes here. A spiral or a funnel only
+ * works if the run is allowed to pass over itself; laid out flat, its second
+ * turn lands on top of its first. Worse, a segment was only ever checked
+ * against track already committed, so a self-overlapping coil was accepted
+ * happily — and then blocked so much ground that nothing could be placed after
+ * it. Some seeds ended up as a single coil and nothing else.
+ */
 type SegmentKind =
   | "straight"
   | "turn"
   | "chicane"
-  | "spiral"
-  | "vortex"
   | "drop"
   | "wave"
-  | "jump"
   | "wide";
 
 const SEGMENT_WEIGHTS: Record<SegmentKind, number> = {
-  straight: 1.0,
-  turn: 2.6,
-  chicane: 1.4,
-  spiral: 1.1,
-  vortex: 0.7,
+  straight: 2.2,
+  turn: 3.0,
+  chicane: 1.6,
   drop: 1.2,
   wave: 1.0,
-  jump: 0.9,
-  wide: 1.0,
+  wide: 1.4,
 };
 
 /** Horizontal step between raw samples while walking, in cm. */
@@ -67,19 +71,17 @@ const WALK_STEP = 2;
  * Keep the run inside roughly this radius, in cm — a run that fits on a large
  * table, and frames well on a phone screen.
  */
-const ARENA_RADIUS = 175;
+const ARENA_RADIUS = 260;
 /**
- * Clearances between two passes of track, centre to centre.
+ * Minimum distance between two passes of track, measured on the ground.
  *
- * These have to exceed the size of the channel itself, or the generator will
- * happily lay one pass through another: the widest sections are about 9cm from
- * centreline to outer shell, and the deepest corner walls stand around 9cm
- * tall. Anything smaller and the run intersects itself, which produces exactly
- * the kind of unexplainable marble behaviour that is very hard to debug from
- * the far end.
+ * Height is deliberately not considered. The run is laid out so that no part
+ * of it ever passes over or under another part: it descends by spreading out
+ * across the ground, like a path down a hillside, rather than by stacking
+ * loops on top of each other. A stacked run is hard to film — the camera is
+ * forever looking at the underside of the loop above — and hard to read.
  */
-const MIN_XZ_CLEARANCE = 21;
-const MIN_Y_CLEARANCE = 10;
+const MIN_XZ_CLEARANCE = 22;
 /**
  * How much of the walk immediately behind the cursor is exempt from the
  * self-intersection test, in samples.
@@ -103,11 +105,6 @@ const MAX_LATERAL_G = 1.15;
  */
 const CREST_G_BUDGET = 0.55;
 /**
- * Share of a marble's ballistic range that a jump gap may span. The rest is
- * margin, for the marbles arriving slower than the leader.
- */
-const JUMP_RANGE_FRACTION = 0.45;
-/**
  * How much steeper than the bare stationary-marble threshold the track must
  * be everywhere. Comfortably above 1, so a marble set down anywhere rolls off
  * with intent rather than creeping.
@@ -118,8 +115,6 @@ const DESCENT_SAFETY_FACTOR = 2.8;
  * the track still runs downhill everywhere, so a marble never has to climb.
  */
 const WAVE_GRADIENT_BUDGET = 0.7;
-/** Below this speed a jump is not attempted at all; the marble cannot clear it. */
-const MIN_JUMP_SPEED = 0.75 * 100;
 
 /**
  * Coarse spatial hash over XZ, used only for the self-intersection test.
@@ -167,7 +162,6 @@ class OccupancyGrid {
         for (const entry of bucket) {
           if (entry.ordinal > ignoreNewerThan) continue;
           const q = entry.point;
-          if (Math.abs(q.y - p.y) >= MIN_Y_CLEARANCE) continue;
           const ddx = q.x - p.x;
           const ddz = q.z - p.z;
           if (ddx * ddx + ddz * ddz < MIN_XZ_CLEARANCE * MIN_XZ_CLEARANCE) return true;
@@ -238,10 +232,23 @@ class TrackWalker {
    */
   tryAppend(candidates: RawPoint[], endCursor: Cursor, ignoreCollisions = false): boolean {
     if (!ignoreCollisions) {
-      // Only test against track laid down before the run-up to here.
+      // Against track already committed, ignoring the run-up to here.
       const horizon = this.grid.count - SELF_CLEARANCE_LOOKBACK;
       for (const c of candidates) {
         if (this.grid.conflicts(c.pos, horizon)) return false;
+      }
+
+      // And against the segment's own earlier points. Without this a segment
+      // that curls back on itself is accepted, because nothing it overlaps has
+      // been committed to the grid yet.
+      for (let i = SELF_CLEARANCE_LOOKBACK; i < candidates.length; i++) {
+        const here = candidates[i].pos;
+        for (let j = 0; j <= i - SELF_CLEARANCE_LOOKBACK; j++) {
+          const there = candidates[j].pos;
+          const ddx = there.x - here.x;
+          const ddz = there.z - here.z;
+          if (ddx * ddx + ddz * ddz < MIN_XZ_CLEARANCE * MIN_XZ_CLEARANCE) return false;
+        }
       }
     }
     for (const c of candidates) {
@@ -324,16 +331,25 @@ function rollSegment(
   rng: Rng,
   kind: SegmentKind,
   walker: TrackWalker,
+  spinSign: number,
 ): Parameters<typeof walkSegment>[1] {
   const base = TRACK_CONSTANTS.baseWidth;
   // Steer back toward the middle when the walk drifts to the edge of the arena.
-  const drifting = walker.radialDistance > ARENA_RADIUS * 0.55;
-  const preferredSign = drifting ? walker.inwardTurnSign : rng.chance(0.5) ? 1 : -1;
+  const drifting = walker.radialDistance > ARENA_RADIUS * 0.6;
+  // Otherwise keep turning the same way most of the time. A consistent bias
+  // winds the run inward as a flat spiral, which packs a long track into a
+  // small footprint without ever crossing itself; an unbiased walk wanders,
+  // boxes itself in against its own earlier passes, and has to stop early.
+  const preferredSign = drifting
+    ? walker.inwardTurnSign
+    : rng.chance(0.82)
+      ? spinSign
+      : -spinSign;
 
   switch (kind) {
     case "straight": {
       return {
-        horizontalLength: rng.range(35, 85),
+        horizontalLength: rng.range(90, 190),
         pitch: deg(rng.range(4.5, 7)),
         yawRate: 0,
         width: base,
@@ -342,7 +358,7 @@ function rollSegment(
     case "turn": {
       const minRadius = walker.minCornerRadius;
       const radius = Math.max(minRadius, rng.range(14, 40));
-      const sweep = rng.range(70, 210) * DEG;
+      const sweep = rng.range(55, 150) * DEG;
       return {
         horizontalLength: radius * sweep,
         pitch: deg(rng.range(4, 6.5)),
@@ -359,33 +375,6 @@ function rollSegment(
         pitch: deg(rng.range(4.5, 7)),
         yawRate: (t) => (t < 0.5 ? preferredSign / radius : -preferredSign / radius),
         width: base,
-      };
-    }
-    case "spiral": {
-      // Spirals are allowed a little tighter: they are continuously banked and
-      // the marble has time to settle into them.
-      const radius = Math.max(walker.minCornerRadius * 0.75, rng.range(15, 26));
-      const turns = rng.range(1.1, 2.4);
-      return {
-        // Steep enough that one full turn clears the vertical separation the
-        // track needs from itself; otherwise a spiral can never be placed.
-        horizontalLength: radius * turns * Math.PI * 2,
-        pitch: deg(rng.range(7.5, 10)),
-        yawRate: preferredSign / radius,
-        width: base * 1.05,
-      };
-    }
-    case "vortex": {
-      // A bowl that winds inwards and tightens as it goes.
-      const outer = Math.max(walker.minCornerRadius, rng.range(26, 36));
-      const inner = Math.max(walker.minCornerRadius * 0.5, rng.range(11, 15));
-      const turns = rng.range(1.6, 2.6);
-      const meanRadius = (outer + inner) / 2;
-      return {
-        horizontalLength: meanRadius * turns * Math.PI * 2,
-        pitch: (t) => deg(4 + t * 5),
-        yawRate: (t) => preferredSign / (outer + (inner - outer) * t),
-        width: (t) => base * (1.25 - 0.35 * t),
       };
     }
     case "drop": {
@@ -427,37 +416,6 @@ function rollSegment(
         yawRate: gentleTurn,
         width: base,
         yOffset: (t) => amplitude * Math.sin(t * cycles * Math.PI * 2),
-      };
-    }
-    case "jump": {
-      // Ramp up to a lip, a gap, then a wide forgiving landing.
-      //
-      // The gap is sized from the speed the marble will actually arrive at.
-      // A projectile launched at v covers at most v²/g before falling back to
-      // the same height, and at 0.8 m/s that is only 6cm — so a gap specified
-      // as "a fraction of the segment" simply swallowed marbles whole. Taking
-      // a conservative share of the real ballistic range gives a jump that
-      // reads as a jump and that marbles clear.
-      const speed = walker.speed;
-      const range = (speed * speed) / GRAVITY;
-      const gapLength = Math.min(14, Math.max(3, range * JUMP_RANGE_FRACTION));
-      const length = rng.range(70, 100);
-      const lipAt = 0.4;
-      const landAt = lipAt + gapLength / length;
-      return {
-        horizontalLength: length,
-        pitch: (t) => {
-          // Flatten the run-up so the marble leaves the lip travelling along
-          // the track rather than already falling.
-          if (t < lipAt) return deg(rng.range(6, 9)) * (1 - t / lipAt) + deg(1.5);
-          // Through the gap the centreline dives, so the landing sits well
-          // below the lip and the marble has room to come down on to it.
-          if (t < landAt) return deg(26);
-          return deg(5);
-        },
-        yawRate: 0,
-        width: (t) => (t > landAt - 0.02 ? base * 1.6 : base),
-        gapRange: [lipAt, landAt],
       };
     }
     case "wide": {
@@ -650,8 +608,6 @@ function smoothArray(values: number[], passes: number): void {
 const BANK_FRACTION = 0.55;
 /** Hardest bank the track will build. Beyond this it stops reading as a track. */
 const MAX_BANK = 32 * DEG;
-/** Ceiling on how tall a corner wall can get, in cm. */
-const MAX_WALL_HEIGHT = 7.5;
 
 /**
  * Banking and wall heights, derived from the cornering forces a marble will
@@ -677,20 +633,14 @@ function computeBanksAndWalls(
   smoothArray(curvature, 6);
 
   const banks = new Array<number>(points.length).fill(0);
+  // Walls are a uniform height everywhere — a plain channel, not a bobsleigh
+  // run that grows a lip wherever the maths says it needs one.
   const wallHeights = new Array<number>(points.length).fill(baseWallHeight);
 
   for (let i = 0; i < points.length; i++) {
     const lateralAccel = speeds[i] * speeds[i] * curvature[i];
     const idealBank = Math.atan(lateralAccel / G);
-    const applied = Math.min(MAX_BANK, idealBank * BANK_FRACTION);
-    banks[i] = applied * (sign[i] || 0);
-
-    // Whatever the banking could not absorb has to be held by the wall.
-    const residual = Math.max(0, lateralAccel - G * Math.tan(applied));
-    wallHeights[i] = Math.min(
-      MAX_WALL_HEIGHT,
-      baseWallHeight + TRACK_CONSTANTS.marbleRadius * (1.4 * (residual / G) + 0.5 * (lateralAccel / G)),
-    );
+    banks[i] = Math.min(MAX_BANK, idealBank * BANK_FRACTION) * (sign[i] || 0);
   }
 
   // Smooth both so the swept surface never twists or steps abruptly.
@@ -848,7 +798,20 @@ const HIGHLIGHT_LABELS: Record<ObstacleKind, string> = {
  */
 export function generateTrack(seedText: string): TrackPlan {
   const rng = new Rng(seedText);
-  const walker = new TrackWalker(new Vector3(0, 0, 0), rng.range(0, Math.PI * 2));
+
+  // Which way this run winds, and where it starts.
+  //
+  // It begins out at the edge of the arena heading along the rim, not in the
+  // middle: a run started at the centre has its own earlier passes on every
+  // side within a few segments and quickly has nowhere left to go, which cut
+  // tracks short. From the rim it can work its way inward across open ground.
+  const spinSign = rng.chance(0.5) ? 1 : -1;
+  const startAngle = rng.range(0, Math.PI * 2);
+  const startRadius = ARENA_RADIUS * 0.86;
+  const walker = new TrackWalker(
+    new Vector3(Math.cos(startAngle) * startRadius, 0, Math.sin(startAngle) * startRadius),
+    startAngle + (spinSign * Math.PI) / 2,
+  );
   walker.seedStart(TRACK_CONSTANTS.baseWidth);
 
   // --- Start gate: a short flat shelf, then the launch ramp. -----------------
@@ -871,7 +834,7 @@ export function generateTrack(seedText: string): TrackPlan {
   }
 
   // --- Body: keep adding segments until we have enough run. ------------------
-  const targetLength = rng.range(1100, 1500);
+  const targetLength = rng.range(1500, 2000);
   const kinds = Object.keys(SEGMENT_WEIGHTS) as SegmentKind[];
   const weights = kinds.map((k) => SEGMENT_WEIGHTS[k]);
   const used: SegmentKind[] = [];
@@ -883,12 +846,10 @@ export function generateTrack(seedText: string): TrackPlan {
     // Don't repeat a segment kind back to back — variety reads better.
     let kind = rng.weighted(kinds, weights);
     if (kind === lastKind) kind = rng.weighted(kinds, weights);
-    // A jump needs speed behind it; early in the run there is none yet.
-    if (kind === "jump" && walker.speed < MIN_JUMP_SPEED) kind = "wave";
 
     let placed = false;
     for (let attempt = 0; attempt < 12 && !placed; attempt++) {
-      const opts = rollSegment(rng, kind, walker);
+      const opts = rollSegment(rng, kind, walker, spinSign);
       const seg = walkSegment(walker.cursor, opts);
       if (walker.tryAppend(seg.points, seg.end)) {
         travelled += opts.horizontalLength;
@@ -899,25 +860,30 @@ export function generateTrack(seedText: string): TrackPlan {
     }
 
     if (!placed) {
-      // Cornered. A descending helix buys vertical clearance, which frees up
-      // the airspace above and lets the walk carry on somewhere new. It has to
-      // obey the same clearance rules as everything else: an escape that
-      // ignored them would lay track straight through track already built,
-      // and the marbles would meet geometry that should not exist.
+      // Cornered. A hairpin turns the run back on itself and carries on
+      // across new ground — the same trick a mountain road uses to lose
+      // height without crossing over itself. The old escape was a descending
+      // helix, which only works if the run is allowed to stack.
       let escaped = false;
-      for (let attempt = 0; attempt < 8 && !escaped; attempt++) {
-        const radius = Math.max(walker.minCornerRadius * 0.8, rng.range(16, 26));
-        const escape = walkSegment(walker.cursor, {
-          horizontalLength: radius * rng.range(1.2, 2.0) * Math.PI * 2,
-          // Steepen with each failed attempt, to drop clear faster.
-          pitch: deg(8 + attempt * 2.5),
-          yawRate: (rng.chance(0.5) ? 1 : -1) / radius,
+      for (let attempt = 0; attempt < 10 && !escaped; attempt++) {
+        // Wide enough that the two legs of the hairpin clear each other.
+        const radius = Math.max(
+          walker.minCornerRadius,
+          MIN_XZ_CLEARANCE * 0.62 + attempt * 4,
+        );
+        const sign =
+          walker.radialDistance > ARENA_RADIUS * 0.5 ? walker.inwardTurnSign : spinSign;
+        const sweep = rng.range(150, 200) * DEG;
+        const hairpin = walkSegment(walker.cursor, {
+          horizontalLength: radius * sweep,
+          pitch: deg(6 + attempt * 0.6),
+          yawRate: sign / radius,
           width: TRACK_CONSTANTS.baseWidth,
         });
-        if (walker.tryAppend(escape.points, escape.end)) {
-          travelled += escape.points.length * WALK_STEP;
-          used.push("spiral");
-          lastKind = "spiral";
+        if (walker.tryAppend(hairpin.points, hairpin.end)) {
+          travelled += hairpin.points.length * WALK_STEP;
+          used.push("turn");
+          lastKind = "turn";
           escaped = true;
         }
       }
@@ -1003,9 +969,8 @@ export function generateTrack(seedText: string): TrackPlan {
       highlights.push(label);
     }
   }
-  if (gaps.length > 0) highlights.unshift(gaps.length > 1 ? `${gaps.length} jumps` : "A jump");
-  if (used.includes("vortex")) highlights.unshift("Vortex bowl");
-  if (used.includes("spiral")) highlights.unshift("Corkscrew");
+  if (used.includes("wave")) highlights.unshift("Rollercoaster");
+  if (used.includes("drop")) highlights.unshift("Steep drops");
 
   return {
     seed: seedText,

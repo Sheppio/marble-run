@@ -5,8 +5,7 @@ import type { TrackPlan } from "./plan";
  * Per-point frames along the centreline: where the track is, which way it
  * points, and which way is "up" for a marble sitting in the channel.
  *
- * Frames are built with parallel transport rather than a naive up-vector, so
- * the channel doesn't flip or twist when the track goes steep or corkscrews.
+ * Frames are anchored to world up, so the channel can never roll over.
  */
 export interface TrackFrame {
   position: Vector3;
@@ -37,40 +36,33 @@ export class TrackGeometry {
       tangents.push(t.normalize());
     }
 
-    // Parallel transport an up-vector along the curve.
-    let up = new Vector3(0, 1, 0);
-    const firstDot = Vector3.Dot(up, tangents[0]);
-    up = up.subtract(tangents[0].scale(firstDot));
-    if (up.lengthSquared() < 1e-6) up = new Vector3(1, 0, 0);
-    up.normalize();
+    const worldUp = new Vector3(0, 1, 0);
 
     for (let i = 0; i < count; i++) {
-      if (i > 0) {
-        // Rotate the previous frame by the rotation carrying t[i-1] onto t[i].
-        const prevT = tangents[i - 1];
-        const currT = tangents[i];
-        const axis = Vector3.Cross(prevT, currT);
-        const sin = axis.length();
-        const cos = Math.max(-1, Math.min(1, Vector3.Dot(prevT, currT)));
-        if (sin > 1e-6) {
-          axis.scaleInPlace(1 / sin);
-          const angle = Math.atan2(sin, cos);
-          up = rotateAroundAxis(up, axis, angle);
-        }
-        // Re-orthogonalise against drift.
-        up = up.subtract(currT.scale(Vector3.Dot(up, currT)));
-        if (up.lengthSquared() < 1e-8) up = new Vector3(0, 1, 0);
-        up.normalize();
-      }
-
       const tangent = tangents[i];
-      // Left-handed basis to match Babylon, so (right, up, tangent) can be fed
-      // straight into a rotation matrix for placing obstacles.
-      const right = Vector3.Cross(up, tangent).normalize();
 
-      // Bank so the outside of the corner rises, whichever side that is. The
-      // magnitude comes from the plan (derived from cornering force); the sign
-      // is resolved here against this frame's own notion of "right".
+      // Frame taken from world up, the way a road is built, rather than
+      // carried along the curve from the previous frame.
+      //
+      // Propagating a frame (parallel transport) is the right tool for a track
+      // that corkscrews or inverts, but it accumulates roll: small errors
+      // compound over a thousand points and the channel gradually rotates
+      // until it is upside down and tips its marbles out. This run never
+      // inverts and never exceeds about 20° of pitch, so anchoring every frame
+      // to world up is both correct and impossible to drift.
+      //
+      // Left-handed basis, to match Babylon: (right, up, tangent).
+      const right = Vector3.Cross(worldUp, tangent);
+      if (right.lengthSquared() < 1e-8) {
+        // Only reachable if the track went vertical, which it cannot.
+        right.set(1, 0, 0);
+      }
+      right.normalize();
+      const up = Vector3.Cross(tangent, right).normalize();
+
+      // Bank so the outside of the corner rises. The magnitude comes from the
+      // plan, which derived it from cornering force; the sign is resolved here
+      // against this frame's own notion of "right".
       const prevT = tangents[Math.max(0, i - 1)];
       const nextT = tangents[Math.min(count - 1, i + 1)];
       const inward = nextT.subtract(prevT);
@@ -176,15 +168,4 @@ export class TrackGeometry {
     }
     return false;
   }
-}
-
-function rotateAroundAxis(v: Vector3, axis: Vector3, angle: number): Vector3 {
-  // Rodrigues' rotation formula.
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-  const dot = Vector3.Dot(axis, v);
-  return v
-    .scale(cos)
-    .add(Vector3.Cross(axis, v).scale(sin))
-    .add(axis.scale(dot * (1 - cos)));
 }

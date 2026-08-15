@@ -63,9 +63,6 @@ export interface DiagnosticOptions {
   seedPrefix?: string;
   disableObstacles?: boolean;
   maxSpeed?: number;
-  /** Overrides the channel lip geometry, for tuning sweeps. */
-  lipFraction?: number;
-  lipSweepDegrees?: number;
   baseWidth?: number;
   rollingResistance?: number;
   pitchScale?: number;
@@ -120,6 +117,7 @@ export async function runSeed(
   // Handy when inspecting a single track from the console.
   (window as unknown as { __lastPlan?: unknown }).__lastPlan = {
     segments: world.plan.segments,
+    segmentCount: world.plan.segments.length,
     gaps: world.plan.gaps.length,
     length: world.plan.totalLength,
     drop: world.plan.totalDrop,
@@ -231,20 +229,12 @@ export async function runDiagnostic(options: DiagnosticOptions = {}): Promise<{
     seedPrefix = "TUNE",
     disableObstacles,
     maxSpeed,
-    lipFraction,
-    lipSweepDegrees,
     baseWidth,
     rollingResistance,
     pitchScale,
   } = options;
 
-  const saved = {
-    fraction: TRACK_CONSTANTS.lipFraction,
-    sweep: TRACK_CONSTANTS.lipSweepDegrees,
-    width: TRACK_CONSTANTS.baseWidth,
-  };
-  if (lipFraction !== undefined) TRACK_CONSTANTS.lipFraction = lipFraction;
-  if (lipSweepDegrees !== undefined) TRACK_CONSTANTS.lipSweepDegrees = lipSweepDegrees;
+  const saved = { width: TRACK_CONSTANTS.baseWidth };
   if (baseWidth !== undefined) TRACK_CONSTANTS.baseWidth = baseWidth;
   const savedPhysics = { ...PHYSICS };
   if (rollingResistance !== undefined) PHYSICS.rollingResistance = rollingResistance;
@@ -259,8 +249,6 @@ export async function runDiagnostic(options: DiagnosticOptions = {}): Promise<{
     );
   }
 
-  TRACK_CONSTANTS.lipFraction = saved.fraction;
-  TRACK_CONSTANTS.lipSweepDegrees = saved.sweep;
   TRACK_CONSTANTS.baseWidth = saved.width;
   Object.assign(PHYSICS, savedPhysics);
 
@@ -420,7 +408,7 @@ export async function restTest(
       rolled++;
     } else {
       stuckAt.push(fraction);
-      stuckOn.push(whatIsHere(index));
+      stuckOn.push(`${whatIsHere(index)}, peak ${(toMetresPerSecond(peak) * 100).toFixed(0)}cm/s`);
     }
     slowest = Math.min(slowest, toMetresPerSecond(peak));
   }
