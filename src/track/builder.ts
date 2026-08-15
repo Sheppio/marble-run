@@ -7,7 +7,7 @@ import { PhysicsShapeType } from "@babylonjs/core/Physics/v2/IPhysicsEnginePlugi
 import type { Scene } from "@babylonjs/core/scene";
 import { TRACK_CONSTANTS } from "./plan";
 import type { TrackGeometry } from "./geometry";
-import { createTimberMaterial, type TimberPalette } from "../render/materials";
+import { createTrackMaterial, type SurfaceOptions, type TimberPalette } from "../render/materials";
 
 /**
  * Sweeps the channel cross-section along the centreline to produce one solid
@@ -66,6 +66,7 @@ export function buildTrackMesh(
   scene: Scene,
   geometry: TrackGeometry,
   palette: TimberPalette,
+  surface: SurfaceOptions,
 ): TrackMeshes {
   const { frames } = geometry;
   const { shellThickness } = TRACK_CONSTANTS;
@@ -177,7 +178,7 @@ export function buildTrackMesh(
     vertexData.applyToMesh(shell, false);
   }
 
-  const material = createTimberMaterial(scene, "track-mat");
+  const material = createTrackMaterial(scene, "track-mat", surface);
   material.backFaceCulling = true;
   shell.material = material;
   shell.useVertexColors = true;

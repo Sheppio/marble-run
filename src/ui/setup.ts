@@ -5,9 +5,12 @@ import {
   buildShareLink,
   colorFor,
   loadRoster,
+  loadThemeId,
   saveRoster,
+  saveThemeId,
 } from "./players";
 import { dailySeed, normaliseSeed, randomSeed } from "../core/seed";
+import { DEFAULT_THEME_ID, THEMES } from "../render/theme";
 import { generateTrack } from "../track/generator";
 import { UNITS_PER_METRE } from "../track/plan";
 
@@ -22,12 +25,15 @@ import { UNITS_PER_METRE } from "../track/plan";
 export interface SetupResult {
   names: string[];
   seed: string;
+  themeId: string;
 }
 
 export class SetupScreen {
   readonly root: HTMLElement;
   private names: string[];
   private seed: string;
+  private themeId: string;
+  private themeRow!: HTMLElement;
   private listNode!: HTMLElement;
   private previewNode!: HTMLElement;
   private addButton!: HTMLButtonElement;
@@ -40,6 +46,7 @@ export class SetupScreen {
   ) {
     this.names = initial.names ?? loadRoster();
     this.seed = normaliseSeed(initial.seed ?? dailySeed());
+    this.themeId = loadThemeId() ?? DEFAULT_THEME_ID;
     this.root = el("div", { class: "screen setup-screen" });
     this.build();
   }
@@ -105,6 +112,12 @@ export class SetupScreen {
       this.previewNode,
     ]);
 
+    this.themeRow = el("div", { class: "chip-row" });
+    const themeSection = el("section", { class: "panel" }, [
+      el("h2", { class: "panel-title", text: "Look" }),
+      this.themeRow,
+    ]);
+
     const startButton = el("button", {
       class: "btn btn-primary btn-start",
       type: "button",
@@ -114,7 +127,7 @@ export class SetupScreen {
       const names = this.collectNames();
       if (names.length < MIN_PLAYERS) return;
       saveRoster(names);
-      this.onStart({ names, seed: this.seed || dailySeed() });
+      this.onStart({ names, seed: this.seed || dailySeed(), themeId: this.themeId });
     });
 
     const shareButton = el("button", {
@@ -141,6 +154,7 @@ export class SetupScreen {
       title,
       racersSection,
       seedSection,
+      themeSection,
       el("div", { class: "action-row" }, [startButton, shareButton]),
       el("p", {
         class: "footnote",
@@ -149,7 +163,30 @@ export class SetupScreen {
     );
 
     this.renderRacers();
+    this.renderThemes();
     this.renderPreview();
+  }
+
+  /**
+   * The theme chips. Purely cosmetic — the seed still decides the race, so a
+   * shared seed reproduces exactly whichever look each player prefers.
+   */
+  private renderThemes(): void {
+    clear(this.themeRow);
+    for (const theme of THEMES) {
+      const chip = el("button", {
+        class: `btn btn-chip${theme.id === this.themeId ? " btn-chip-active" : ""}`,
+        type: "button",
+        text: theme.label,
+        title: theme.blurb,
+      });
+      chip.addEventListener("click", () => {
+        this.themeId = theme.id;
+        saveThemeId(theme.id);
+        this.renderThemes();
+      });
+      this.themeRow.append(chip);
+    }
   }
 
   private setSeed(seed: string): void {
@@ -169,7 +206,7 @@ export class SetupScreen {
 
     this.names.forEach((name, index) => {
       const swatch = el("span", { class: "swatch" });
-      swatch.style.background = colorFor(index);
+      swatch.style.background = colorFor(index, this.names.length);
 
       const input = el("input", {
         class: "racer-input",

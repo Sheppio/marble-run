@@ -10,6 +10,7 @@ import {
 import type { Scene } from "@babylonjs/core/scene";
 import { TRACK_CONSTANTS } from "../track/plan";
 import { createMarbleMaterial } from "../render/materials";
+import type { Theme } from "../render/theme";
 
 export interface Player {
   id: number;
@@ -93,6 +94,7 @@ export class Marble {
     scene: Scene,
     readonly player: Player,
     position: Vector3,
+    finish: Theme["marble"],
   ) {
     this.mesh = CreateSphere(
       `marble-${player.id}`,
@@ -106,6 +108,7 @@ export class Marble {
       scene,
       `marble-mat-${player.id}`,
       Color3.FromHexString(player.color),
+      finish,
     );
 
     this.aggregate = new PhysicsAggregate(

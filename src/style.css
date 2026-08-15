@@ -124,6 +124,13 @@ body {
   border-radius: 999px;
 }
 
+.btn-chip-active {
+  background: linear-gradient(135deg, var(--accent), #2f7fe0);
+  border-color: transparent;
+  color: #051021;
+  font-weight: 700;
+}
+
 .btn-remove {
   width: 40px;
   min-width: 40px;

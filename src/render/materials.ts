@@ -53,63 +53,49 @@ export function createSurface(
  * when it is in shadow, which matters because the colour is how a player finds
  * themselves in the pack.
  */
-export function createMarbleMaterial(scene: Scene, name: string, color: Color3): PBRMaterial {
-  const material = createSurface(scene, name, color, {
-    metallic: 0.0,
-    roughness: 0.04,
-    clearCoat: 1.0,
-    environmentIntensity: 1.15,
-  });
-  material.emissiveColor = color.scale(0.12);
-  // A touch of sheen at grazing angles, which is what reads as "glass".
-  material.sheen.isEnabled = true;
-  // Subtle. At higher intensities every marble picks up a hard white rim and
-  // starts to look like a sticker rather than a sphere.
-  material.sheen.intensity = 0.12;
-  material.sheen.color = Color3.White();
-  return material;
-}
-
-/** Varnished timber, for the track itself. */
-export function createTimberMaterial(scene: Scene, name: string): PBRMaterial {
-  const material = createSurface(scene, name, Color3.White(), {
-    metallic: 0.0,
-    roughness: 0.58,
-    // Light varnish only. A strong clear coat washes the grain colour out
-    // into a flat cream, which is what an earlier pass looked like.
-    clearCoat: 0.18,
-    environmentIntensity: 0.4,
-  });
+export function createMarbleMaterial(
+  scene: Scene,
+  name: string,
+  color: Color3,
+  finish: SurfaceOptions & { emissive: number; sheen: number },
+): PBRMaterial {
+  const material = createSurface(scene, name, color, finish);
+  material.emissiveColor = color.scale(finish.emissive);
+  if (finish.sheen > 0) {
+    // A touch of sheen at grazing angles is what reads as "glass". Kept
+    // subtle: turned up, every marble picks up a hard white rim and starts to
+    // look like a sticker rather than a sphere.
+    material.sheen.isEnabled = true;
+    material.sheen.intensity = finish.sheen;
+    material.sheen.color = Color3.White();
+  }
   return material;
 }
 
 /**
- * The colour scheme of a track, derived from its seed.
- *
- * Kept within a band of warm timbers rather than the full colour wheel: every
- * track should look like the same workshop made it, and a lilac or mint green
- * marble run looks like a bug rather than a choice.
+ * The track surface. Vertex colours carry the palette, so the material only
+ * decides how the surface behaves in light.
  */
+export function createTrackMaterial(
+  scene: Scene,
+  name: string,
+  options: SurfaceOptions,
+): PBRMaterial {
+  // Emission is dropped here even when a theme asks for it. The whole run is
+  // one mesh with one material and its palette lives in vertex colours, but
+  // emissive is a material-wide constant — so any glow value lights the deck
+  // exactly as brightly as the walls and renders the entire track as a single
+  // white slab. (It does: that is what setting it looked like.) Self-lit themes
+  // get their glow from threshold bloom, which works off rendered brightness
+  // and picks out the lit wall vertices on its own.
+  const { glow: _ignored, ...rest } = options;
+  return createSurface(scene, name, Color3.White(), rest);
+}
+
+/** The colour scheme of a track. Each theme supplies its own. */
 export interface TimberPalette {
   floor: Color3;
   wall: Color3;
   underside: Color3;
   stripe: Color3;
-}
-
-export function deriveTimberPalette(seedValue: number): TimberPalette {
-  // Hue restricted to the range from walnut through oak to beech.
-  const hue = 20 + (seedValue % 26);
-  const saturation = 0.42 + ((seedValue >> 8) % 14) / 100;
-
-  return {
-    floor: Color3.FromHSV(hue, saturation, 0.34),
-    // Walls catch the light, so they read a shade lighter than the floor.
-    wall: Color3.FromHSV(hue, saturation * 0.9, 0.46),
-    // The underside is in permanent shadow; keeping it dark gives the run
-    // a sense of thickness from below.
-    underside: Color3.FromHSV(hue, saturation * 1.15, 0.15),
-    // Cross-grain banding, a shade paler, to give a sense of travel.
-    stripe: Color3.FromHSV(hue + 6, saturation * 0.7, 0.45),
-  };
 }

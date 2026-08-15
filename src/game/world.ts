@@ -8,6 +8,7 @@ import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
 import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder";
+import { DefaultRenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/defaultRenderingPipeline";
 import { HavokPlugin } from "@babylonjs/core/Physics/v2/Plugins/havokPlugin";
 import "@babylonjs/core/Physics/physicsEngineComponent";
 import "@babylonjs/core/Meshes/thinInstanceMesh";
@@ -19,8 +20,9 @@ import { TrackGeometry } from "../track/geometry";
 import { buildTrackMesh, type TrackMeshes } from "../track/builder";
 import { buildObstacles, type ObstacleSet } from "../track/obstacles";
 import { hashSeed } from "../core/rng";
-import { createEnvironment, DEFAULT_SKY, type WorldLighting } from "../render/environment";
-import { createSurface, deriveTimberPalette } from "../render/materials";
+import { createEnvironment, type WorldLighting } from "../render/environment";
+import { createSurface } from "../render/materials";
+import { getTheme, type Theme } from "../render/theme";
 import { detectQuality, type QualitySettings } from "./quality";
 import { BroadcastCamera } from "./camera";
 import { Race, FIXED_STEP, type RaceEvents } from "./race";
@@ -58,6 +60,8 @@ export interface WorldOptions {
    * Used by the tuning harness to run hundreds of races quickly.
    */
   headless?: boolean;
+  /** Visual theme. Purely cosmetic — it cannot change a race's outcome. */
+  themeId?: string;
   /** Tuning knobs — omit both outside the diagnostic harness. */
   disableObstacles?: boolean;
   maxSpeed?: number;
@@ -72,11 +76,13 @@ export class World {
   readonly race: Race;
   readonly camera: BroadcastCamera;
 
+  readonly theme: Theme;
   private readonly lighting: WorldLighting | null;
   readonly headless: boolean;
   private readonly trackMeshes: TrackMeshes;
   private readonly obstacles: ObstacleSet;
   private readonly decor: Mesh[] = [];
+  private glow: DefaultRenderingPipeline | null = null;
   private startGate: Mesh | null = null;
   private gateOpenAmount = 0;
   private previewProgress = 0;
@@ -129,19 +135,28 @@ export class World {
     this.plan = generateTrack(options.seed);
     this.geometry = new TrackGeometry(this.plan);
 
+    const theme = getTheme(options.themeId);
+    this.theme = theme;
     const paletteSeed = hashSeed(`${options.seed}:palette`);
     this.lighting = this.headless
       ? null
-      : createEnvironment(this.scene, DEFAULT_SKY, {
+      : createEnvironment(this.scene, theme.sky, {
           shadows: this.quality.shadows,
           shadowMapSize: this.quality.shadowMapSize,
+          ...theme.lighting,
         });
 
-    this.trackMeshes = buildTrackMesh(this.scene, this.geometry, deriveTimberPalette(paletteSeed));
+    this.trackMeshes = buildTrackMesh(
+      this.scene,
+      this.geometry,
+      theme.track(paletteSeed),
+      theme.trackSurface,
+    );
     this.obstacles = buildObstacles(
       this.scene,
       this.geometry,
       options.disableObstacles ? [] : this.plan.obstacles,
+      theme,
     );
 
     if (!this.headless) {
@@ -153,6 +168,8 @@ export class World {
 
     // --- Race --------------------------------------------------------------
     this.camera = new BroadcastCamera(this.scene, this.geometry);
+    // After the camera: the bloom pipeline attaches to it.
+    if (!this.headless) this.buildGlow();
     this.race = new Race(
       this.scene,
       this.geometry,
@@ -160,6 +177,7 @@ export class World {
       options.players,
       options.events,
       options.maxSpeed,
+      theme,
     );
 
     if (this.lighting?.shadowGenerator) {
@@ -190,10 +208,11 @@ export class World {
       { width: frame.width * 2.4, height: 4, depth: 0.4 },
       this.scene,
     );
-    gate.material = createSurface(this.scene, "gate-mat", Color3.FromHexString("#e8404f"), {
+    gate.material = createSurface(this.scene, "gate-mat", this.theme.decor.gate, {
       metallic: 0.1,
       roughness: 0.35,
       clearCoat: 0.5,
+      glow: this.theme.bloom ? 0.7 : undefined,
     });
 
     const m = Matrix.Identity();
@@ -213,12 +232,12 @@ export class World {
     Matrix.FromXYZAxesToRef(frame.right, frame.up, frame.tangent, m);
     const rotation = Quaternion.FromRotationMatrix(m);
 
-    const bannerMaterial = createSurface(
-      this.scene,
-      "finish-mat",
-      Color3.FromHexString("#f2f4f8"),
-      { metallic: 0.15, roughness: 0.35, clearCoat: 0.4 },
-    );
+    const bannerMaterial = createSurface(this.scene, "finish-mat", this.theme.decor.banner, {
+      metallic: 0.15,
+      roughness: 0.35,
+      clearCoat: 0.4,
+      glow: this.theme.bloom ? 0.7 : undefined,
+    });
 
     const width = frame.width * 2.6;
     for (const side of [-1, 1]) {
@@ -259,7 +278,7 @@ export class World {
       { diameterTop: 0.9, diameterBottom: 1.8, height: 1, tessellation: 8 },
       this.scene,
     );
-    pillar.material = createSurface(this.scene, "support-mat", Color3.FromHexString("#4a4038"), {
+    pillar.material = createSurface(this.scene, "support-mat", this.theme.decor.support, {
       metallic: 0.15,
       roughness: 0.6,
     });
@@ -297,6 +316,31 @@ export class World {
   }
 
   /**
+   * Bloom for themes that light themselves.
+   *
+   * Only worth its cost where emission is doing real work: in Neon the glow is
+   * how the shape of the run is read at all, since there is barely any sun.
+   * The layer is skipped entirely otherwise rather than run at zero strength,
+   * because it is a full-screen pass either way.
+   */
+  private buildGlow(): void {
+    if (!this.theme.bloom || !this.quality.scenery) return;
+    const pipeline = new DefaultRenderingPipeline("bloom", false, this.scene, [
+      this.camera.camera,
+    ]);
+    pipeline.fxaaEnabled = false; // The engine's MSAA already handles edges.
+    pipeline.bloomEnabled = true;
+    // Threshold rather than emissive-driven, so the bloom follows what is
+    // actually bright on screen: the lit walls and stripes bloom, the near-black
+    // deck between them does not, and the track keeps its shape.
+    pipeline.bloomThreshold = 0.5;
+    pipeline.bloomWeight = this.theme.bloom;
+    pipeline.bloomKernel = 48;
+    pipeline.bloomScale = 0.5;
+    this.glow = pipeline;
+  }
+
+  /**
    * The surface the run stands on.
    *
    * Without it the track floats in an empty sky, which reads as a diagram
@@ -310,7 +354,7 @@ export class World {
 
     const floor = CreateGround("floor", { width: 1600, height: 1600, subdivisions: 1 }, this.scene);
     floor.position.y = lowest - TABLE_DROP;
-    floor.material = createSurface(this.scene, "floor-mat", Color3.FromHexString("#3b4a3f"), {
+    floor.material = createSurface(this.scene, "floor-mat", this.theme.ground, {
       metallic: 0.0,
       roughness: 0.95,
       environmentIntensity: 0.35,
@@ -383,6 +427,7 @@ export class World {
     window.removeEventListener("resize", this.handleResize);
     this.engine.stopRenderLoop();
     this.race.dispose();
+    this.glow?.dispose();
     this.obstacles.dispose();
     this.trackMeshes.dispose();
     this.lighting?.dispose();

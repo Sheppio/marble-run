@@ -3,6 +3,7 @@ import type { Scene } from "@babylonjs/core/scene";
 import type { TrackGeometry } from "../track/geometry";
 import type { ForceZone } from "../track/obstacles";
 import { Marble, type Player } from "./marble";
+import { getTheme, type Theme } from "../render/theme";
 import {
   GRAVITY,
   MAX_MARBLE_SPEED,
@@ -124,6 +125,7 @@ export class Race {
     private readonly events: RaceEvents = {},
     /** Overridable so the tuning harness can isolate speed-related failures. */
     private readonly maxSpeed: number = DEFAULT_MAX_SPEED,
+    private readonly theme: Theme = getTheme(null),
   ) {
     this.spawnMarbles(players);
   }
@@ -145,7 +147,7 @@ export class Race {
         .add(frame.right.scale(lateral))
         .add(frame.up.scale(TRACK_CONSTANTS.marbleRadius * 1.4));
 
-      const marble = new Marble(this.scene, player, position);
+      const marble = new Marble(this.scene, player, position, this.theme.marble);
       marble.freeze();
       marble.progressIndex = this.geometry.plan.startIndex;
       marble.distance = this.geometry.distanceAtIndex(marble.progressIndex);

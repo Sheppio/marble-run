@@ -4,7 +4,7 @@ import { el } from "./ui/dom";
 import { SetupScreen } from "./ui/setup";
 import { Hud } from "./ui/hud";
 import { ResultsScreen } from "./ui/results";
-import { buildShareLink, makePlayers, readShareLink } from "./ui/players";
+import { buildShareLink, loadThemeId, makePlayers, readShareLink } from "./ui/players";
 import { normaliseSeed, randomSeed } from "./core/seed";
 import { World, initPhysics } from "./game/world";
 import type { Standing } from "./game/race";
@@ -28,6 +28,7 @@ let currentScreen: Screen | null = null;
 let world: World | null = null;
 let roster: string[] = [];
 let seed = "";
+let themeId = "";
 
 function showScreen(screen: Screen | null): void {
   currentScreen?.dispose();
@@ -78,6 +79,7 @@ function showSetup(): void {
     new SetupScreen({ names: roster.length > 0 ? roster : undefined, seed }, (result) => {
       roster = result.names;
       seed = result.seed;
+      themeId = result.themeId;
       void startRace();
     }),
   );
@@ -101,6 +103,7 @@ async function startRace(): Promise<void> {
       canvas,
       seed,
       players: makePlayers(roster),
+      themeId,
       events: {
         onCountdownTick: (value) => hud?.showCountdown(value),
         onRaceComplete,
@@ -204,6 +207,7 @@ async function boot(): Promise<void> {
   const shared = readShareLink();
   seed = normaliseSeed(shared.seed ?? "");
   roster = shared.names ?? [];
+  themeId = loadThemeId() ?? "";
 
   try {
     await initPhysics();

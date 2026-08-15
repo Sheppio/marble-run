@@ -124,11 +124,18 @@ export interface WorldLighting {
 export function createEnvironment(
   scene: Scene,
   palette: SkyPalette,
-  options: { shadows: boolean; shadowMapSize: number },
+  options: {
+    shadows: boolean;
+    shadowMapSize: number;
+    sunIntensity: number;
+    ambientIntensity: number;
+    environmentIntensity: number;
+    shadowDarkness: number;
+  },
 ): WorldLighting {
   const skyTexture = createSkyTexture(scene, palette);
   scene.environmentTexture = skyTexture;
-  scene.environmentIntensity = 1.0;
+  scene.environmentIntensity = options.environmentIntensity;
 
   // A big inverted sphere textured with the same sky, so backdrop and
   // reflections always agree.
@@ -144,12 +151,12 @@ export function createEnvironment(
   skybox.applyFog = false;
 
   const ambient = new HemisphericLight("ambient", new Vector3(0, 1, 0), scene);
-  ambient.intensity = 0.42;
+  ambient.intensity = options.ambientIntensity;
   ambient.diffuse = palette.horizon;
   ambient.groundColor = palette.ground;
 
   const sun = new DirectionalLight("sun", SUN_DIRECTION.clone(), scene);
-  sun.intensity = 2.8;
+  sun.intensity = options.sunIntensity;
   sun.diffuse = palette.sun;
   sun.autoUpdateExtends = false;
   sun.shadowMinZ = 5;
@@ -162,7 +169,7 @@ export function createEnvironment(
     shadowGenerator.filteringQuality = ShadowGenerator.QUALITY_LOW;
     shadowGenerator.bias = 0.0015;
     shadowGenerator.normalBias = 0.4;
-    shadowGenerator.darkness = 0.25;
+    shadowGenerator.darkness = options.shadowDarkness;
   }
 
   return {

@@ -5,39 +5,101 @@ import type { Player } from "../game/marble";
  */
 
 /**
- * Marble colours, ordered so that any prefix of the list stays easy to tell
- * apart — including for the most common forms of colour blindness, which is
- * why red and green are never adjacent picks.
+ * Marble colours.
+ *
+ * Built from the colour wheel divided by the size of the field, so however
+ * many are racing, the hues are as far apart as they can be. Once there are
+ * enough racers to spare them, a white and a black marble join the set: they
+ * are instantly recognisable, and no hue can be confused with them.
+ *
+ * The consequence — which is deliberate but worth knowing — is that adding or
+ * removing a racer re-colours the whole field. Fixing each player to a colour
+ * for life would mean a fixed list, and a fixed list either wastes the wheel
+ * on small fields or crowds it on large ones.
  */
-export const MARBLE_COLORS = [
-  "#ff4d6d", // raspberry
-  "#4dabff", // azure
-  "#ffd23f", // sunflower
-  "#2fd18b", // jade
-  "#c77dff", // violet
-  "#ff8c42", // tangerine
-  "#00d5d5", // teal
-  "#f5f0e8", // pearl
-  "#8b6cff", // indigo
-  "#ff6fd8", // orchid
-  "#9bd643", // lime
-  "#b0782c", // bronze
-] as const;
 
-export const MAX_PLAYERS = MARBLE_COLORS.length;
-export const MIN_PLAYERS = 2;
+/** Saturation and value for the coloured marbles. High: these read at a distance. */
+const MARBLE_SATURATION = 0.9;
+const MARBLE_VALUE = 1.0;
+
+/** The two neutrals, used once the field is large enough to spare the slots. */
+const PEARL = "#f7f7fa";
+const OBSIDIAN = "#16161c";
+
+/** Below this many racers, every marble gets a hue — neutrals would dominate. */
+const NEUTRALS_FROM = 5;
 
 const STORAGE_KEY = "marble-run:roster";
+const THEME_KEY = "marble-run:theme";
 
-export function colorFor(index: number): string {
-  return MARBLE_COLORS[index % MARBLE_COLORS.length];
+/** The visual theme chosen last time, if any. */
+export function loadThemeId(): string | null {
+  try {
+    return localStorage.getItem(THEME_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function saveThemeId(id: string): void {
+  try {
+    localStorage.setItem(THEME_KEY, id);
+  } catch {
+    // Private browsing; the theme just reverts to the default next time.
+  }
+}
+
+export const MAX_PLAYERS = 12;
+export const MIN_PLAYERS = 2;
+
+function hsvToHex(hue: number, saturation: number, value: number): string {
+  const c = value * saturation;
+  const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+  const m = value - c;
+  const sector = Math.floor(hue / 60) % 6;
+  const [r, g, b] = [
+    [c, x, 0],
+    [x, c, 0],
+    [0, c, x],
+    [0, x, c],
+    [x, 0, c],
+    [c, 0, x],
+  ][sector];
+  const channel = (v: number) =>
+    Math.round((v + m) * 255)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${channel(r)}${channel(g)}${channel(b)}`;
+}
+
+/** The colours for a field of `count` marbles, in racing order. */
+export function paletteFor(count: number): string[] {
+  const size = Math.max(MIN_PLAYERS, Math.min(MAX_PLAYERS, count));
+  const withNeutrals = size >= NEUTRALS_FROM;
+  const hueCount = withNeutrals ? size - 2 : size;
+
+  const colours: string[] = [];
+  for (let i = 0; i < hueCount; i++) {
+    // Start a little off red, so the first marble is not the same colour as
+    // every warning light the eye is trained to ignore.
+    const hue = (25 + (i * 360) / hueCount) % 360;
+    colours.push(hsvToHex(hue, MARBLE_SATURATION, MARBLE_VALUE));
+  }
+  if (withNeutrals) colours.push(PEARL, OBSIDIAN);
+  return colours;
+}
+
+export function colorFor(index: number, count: number): string {
+  const palette = paletteFor(count);
+  return palette[index % palette.length];
 }
 
 export function makePlayers(names: string[]): Player[] {
+  const palette = paletteFor(names.length);
   return names.map((name, i) => ({
     id: i,
     name: name.trim() || `Racer ${i + 1}`,
-    color: colorFor(i),
+    color: palette[i % palette.length],
   }));
 }
 

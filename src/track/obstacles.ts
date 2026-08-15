@@ -1,4 +1,3 @@
-import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
@@ -11,6 +10,7 @@ import type { Scene } from "@babylonjs/core/scene";
 import { createSurface } from "../render/materials";
 import type { TrackGeometry, TrackFrame } from "./geometry";
 import { TRACK_CONSTANTS, type ObstacleSpec } from "./plan";
+import type { Theme } from "../render/theme";
 
 /**
  * Obstacles.
@@ -108,27 +108,49 @@ function createWedge(name: string, width: number, length: number, height: number
   return mesh;
 }
 
-/** Lateral offsets for one row of a pattern, evenly spaced and centred. */
-function rowOffsets(count: number, usableHalfWidth: number): number[] {
+/**
+ * Lateral offsets for one row of a pattern, evenly spaced and centred.
+ *
+ * `shift` moves the row sideways by that fraction of the pin spacing, which is
+ * how the grid gets staggered: without it, every row sits directly behind the
+ * one in front and a marble that threads the first row sails through all of
+ * them untouched.
+ */
+function rowOffsets(count: number, usableHalfWidth: number, shift = 0): number[] {
   if (count <= 0) return [];
-  if (count === 1) return [0];
+  if (count === 1) return [usableHalfWidth * shift];
   const spacing = (usableHalfWidth * 2) / (count - 1);
-  return Array.from({ length: count }, (_, i) => -usableHalfWidth + i * spacing);
+  return Array.from(
+    { length: count },
+    (_, i) => -usableHalfWidth + i * spacing + spacing * shift,
+  );
 }
 
 export function buildObstacles(
   scene: Scene,
   geometry: TrackGeometry,
   specs: ObstacleSpec[],
+  theme: Theme,
 ): ObstacleSet {
   const statics: PhysicsAggregate[] = [];
   const shadowCasters: Mesh[] = [];
 
+  const finish = theme.obstacles;
   const materials = {
-    pin: makeMaterial(scene, "#c8d0dd", { metallic: 0.85, roughness: 0.22 }),
-    post: makeMaterial(scene, "#e0b14a", { metallic: 0.6, roughness: 0.3 }),
-    timber: makeMaterial(scene, "#7d4f2a", { metallic: 0.0, roughness: 0.72 }),
-    rubber: makeMaterial(scene, "#2c3446", { metallic: 0.0, roughness: 0.9 }),
+    pin: createSurface(scene, `obs-pin-${theme.id}`, finish.pin.color, finish.pin.surface),
+    post: createSurface(scene, `obs-post-${theme.id}`, finish.post.color, finish.post.surface),
+    timber: createSurface(
+      scene,
+      `obs-structure-${theme.id}`,
+      finish.structure.color,
+      finish.structure.surface,
+    ),
+    rubber: createSurface(
+      scene,
+      `obs-barrier-${theme.id}`,
+      finish.barrier.color,
+      finish.barrier.surface,
+    ),
   };
 
   const track = (index: number) => geometry.frameAt(index);
@@ -171,6 +193,9 @@ export function buildObstacles(
           // Bowling: one pin in the front row, growing by one each row back.
           // Grid: the same count in every row.
           const wanted = isTriangle ? r + 1 : Math.round(p.columns);
+          // Every other row steps across by half a space. A triangle staggers
+          // by construction; a grid has to be told to.
+          const shift = isTriangle ? 0 : (r % 2) * 0.5;
 
           // How many pins fit while leaving a marble-width gap between every
           // pair *and* between the outermost pins and the walls. Counting only
@@ -184,7 +209,7 @@ export function buildObstacles(
           const count = Math.min(wanted, maxCount);
           const usable = Math.max(0, rowFrame.width - MIN_PIN_GAP - diameter * 0.5);
 
-          for (const lateral of rowOffsets(count, usable)) {
+          for (const lateral of rowOffsets(count, usable, shift)) {
             const pin = CreateCylinder(
               "pin",
               { diameterTop: diameter * 0.72, diameterBottom: diameter, height, tessellation: 10 },
@@ -219,7 +244,8 @@ export function buildObstacles(
         // one leaves a clear lane past its tip, and is angled downstream so a
         // marble is deflected along it rather than stopped by it.
         const count = Math.round(p.count);
-        const spacing = 5.5;
+        // Spaced out, so the field has room to re-form between them.
+        const spacing = 8.0;
         const thickness = 0.7;
         // Below the wall top, so a marble riding over one is not trapped.
         const height = 1.6;
@@ -230,9 +256,12 @@ export function buildObstacles(
           const side = i % 2 === 0 ? -1 : 1;
           // Reaches across at most half the channel, so the lane past its tip
           // is always wide enough for several marbles to stream through.
-          // A nudge, not a wall: roughly a third of the channel, leaving the
-          // rest clear. Long baffles were where marbles most often came to rest.
-          const reach = Math.max(1.0, Math.min(f.width * 0.38, f.width * 2 - MIN_CLEAR_LANE));
+          // Reaches across most of the channel, so the field has to funnel
+          // past the tip and bunches up doing it. This is the obstacle that
+          // creates the most drama and also the most trouble — it is kept to
+          // straights, where the banking is not already pressing marbles into
+          // the wall it grows from.
+          const reach = Math.max(1.0, Math.min(f.width * 1.05, f.width * 2 - MIN_CLEAR_LANE));
           const baffle = CreateBox(
             "baffle",
             { width: reach, height, depth: thickness },
@@ -316,12 +345,4 @@ export function buildObstacles(
       }
     },
   };
-}
-
-function makeMaterial(
-  scene: Scene,
-  hex: string,
-  options: { metallic: number; roughness: number },
-): PBRMaterial {
-  return createSurface(scene, `obstacle-${hex}`, Color3.FromHexString(hex), options);
 }
