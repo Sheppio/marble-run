@@ -87,6 +87,7 @@ another:
 | Wave amplitude | Speed and wavelength, so marbles never leave the crest, and the segment's own gradient, so troughs never climb |
 | Minimum gradient | Rolling resistance, so a resting marble always moves off |
 | Obstacle lane widths | Marble diameter, so nothing can wedge a marble |
+| Pin-field placement | Channel width, since a standard channel only fits one pin per row |
 
 Segments are straights, turns, chicanes, drops, undulations and widened
 sections. There are deliberately no helical shapes: a spiral only works if the
@@ -126,6 +127,14 @@ npm run tune:escapes   # classifies how marbles leave the channel
 often the recovery system had to intervene and why, and which obstacle was
 nearest when it did — which is how every tuning decision in this repository was
 actually made.
+
+## Rendering
+
+Multisampling is on at every quality tier, and the scene renders at CSS
+resolution or better — one and a half times it on a mid-range phone, twice on
+a desktop. Babylon's hardware scaling level divides rather than multiplies, so
+a "scale" above 1 draws *below* CSS resolution; getting that backwards drew the
+whole run at about four tenths of resolution and stepped every edge in it.
 
 ## Recovery
 

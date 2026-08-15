@@ -7,7 +7,18 @@
 
 export interface QualitySettings {
   tier: "low" | "medium" | "high";
-  /** Babylon hardware scaling; >1 renders below native resolution. */
+  /**
+   * Babylon's hardware scaling level: the render buffer is the CSS size
+   * *divided* by this. So 1 draws at CSS resolution, 0.5 draws at twice it
+   * (crisp on a high-density screen), and anything above 1 draws at less than
+   * CSS resolution and is upscaled to fit.
+   *
+   * The sense of this is easy to get backwards, and getting it backwards is
+   * expensive: a phone reporting a device pixel ratio of 3 was being given a
+   * scaling level of 2.4, which drew the whole scene at about four tenths of
+   * CSS resolution and then stretched it over the screen. Every edge in the
+   * run was visibly stepped.
+   */
   hardwareScaling: number;
   shadows: boolean;
   shadowMapSize: number;
@@ -23,13 +34,18 @@ export function detectQuality(): QualitySettings {
   const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
   const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? (isMobile ? 4 : 8);
 
+  // Multisampling is on at every tier. On the tile-based GPUs phones use it is
+  // close to free, and the run is nearly all long straight edges — a channel
+  // rim, a row of pins — which is exactly what aliasing shows up on worst.
   if (isMobile && (cores <= 4 || memory <= 3)) {
     return {
       tier: "low",
-      hardwareScaling: Math.max(1, Math.min(dpr, 1.5)),
+      // CSS resolution: sharp enough to lose the stepping, cheap enough for a
+      // weak GPU.
+      hardwareScaling: 1,
       shadows: false,
       shadowMapSize: 512,
-      antialias: false,
+      antialias: true,
       glow: false,
       scenery: false,
     };
@@ -38,12 +54,12 @@ export function detectQuality(): QualitySettings {
   if (isMobile) {
     return {
       tier: "medium",
-      // Cap at 1.25× device pixels — beyond that a phone is shading pixels
-      // nobody can see, at real cost to the frame budget.
-      hardwareScaling: Math.max(1, dpr / 1.25),
+      // Half again over CSS resolution. Beyond about this a phone is shading
+      // pixels nobody can distinguish, at real cost to the frame budget.
+      hardwareScaling: 1 / Math.min(dpr, 1.5),
       shadows: true,
       shadowMapSize: 1024,
-      antialias: false,
+      antialias: true,
       glow: false,
       scenery: true,
     };
@@ -51,7 +67,7 @@ export function detectQuality(): QualitySettings {
 
   return {
     tier: "high",
-    hardwareScaling: Math.max(1, dpr / 2),
+    hardwareScaling: 1 / Math.min(dpr, 2),
     shadows: true,
     shadowMapSize: 2048,
     antialias: true,

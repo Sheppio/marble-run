@@ -34,7 +34,7 @@ export function toMetresPerSecond(unitsPerSecond: number): number {
 }
 
 /**
- * Ceiling on marble speed, in units per second (0.8 m/s).
+ * Ceiling on marble speed, in units per second (0.6 m/s).
  *
  * Approached rather than clamped: a drag term ramps up steeply near it, so
  * marbles settle around it the way air resistance would, instead of hitting an
@@ -42,7 +42,7 @@ export function toMetresPerSecond(unitsPerSecond: number): number {
  * physics step than the track shell is thick, which is what would let one pass
  * straight through the floor.
  */
-export const MAX_MARBLE_SPEED = 0.8 * UNITS_PER_METRE;
+export const MAX_MARBLE_SPEED = 0.6 * UNITS_PER_METRE;
 
 /**
  * The two numbers that between them set how fast the run flows.

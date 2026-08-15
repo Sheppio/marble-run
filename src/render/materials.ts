@@ -63,7 +63,9 @@ export function createMarbleMaterial(scene: Scene, name: string, color: Color3):
   material.emissiveColor = color.scale(0.12);
   // A touch of sheen at grazing angles, which is what reads as "glass".
   material.sheen.isEnabled = true;
-  material.sheen.intensity = 0.35;
+  // Subtle. At higher intensities every marble picks up a hard white rim and
+  // starts to look like a sticker rather than a sphere.
+  material.sheen.intensity = 0.12;
   material.sheen.color = Color3.White();
   return material;
 }

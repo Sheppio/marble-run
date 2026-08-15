@@ -705,13 +705,18 @@ function placeObstacles(
     const weights = OBSTACLE_KINDS.map((kind) => {
       switch (kind) {
         case "pins":
-          return roomy > 1.4 ? 3.0 : 1.2;
+          // Only worth placing where the channel is genuinely wide. In a
+          // standard-width channel only one pin fits per row once every gap is
+          // kept marble-width, so a "triangle" collapses into a straight line
+          // of pins down the middle, which marbles simply flow past.
+          return roomy > 1.7 ? 5.0 : 0;
         case "wedge":
           return straightness * 1.6 + 0.4;
         case "baffles":
-          // Kept rare on purpose: of the static obstacles this is the one
-          // marbles most often come to rest against.
-          return straightness * 0.7 + 0.1;
+          // Straights only. On a bend the banking presses the field into the
+          // outer wall, which is exactly where a baffle grows from, so the
+          // whole field piles into it.
+          return straightness > 0.85 ? 1.4 : 0;
         case "posts":
           return 1.2;
         case "divider":

@@ -277,11 +277,12 @@ export class Race {
     const rolling = PHYSICS.rollingResistance * GRAVITY;
     let deceleration = rolling;
 
-    // Drag, shaped to be negligible in normal flow and firm at the ceiling.
-    // The high exponent is what keeps it out of the way of ordinary rolling
-    // while still holding the ceiling against a marble arriving off a drop.
+    // Drag. A low exponent on purpose: it starts to bite well before the
+    // ceiling, so a marble eases up to its top speed over a couple of metres
+    // instead of leaping to it the moment the track tips downhill. A steeper
+    // curve holds the same ceiling but makes everything below it feel abrupt.
     const ratio = speed / this.maxSpeed;
-    deceleration += rolling * 25 * Math.pow(ratio, 8);
+    deceleration += rolling * 6 * Math.pow(ratio, 3);
 
     // Never reverse a marble: cap the impulse at what stops it this step.
     const delta = Math.min(deceleration * FIXED_STEP, speed);

@@ -221,7 +221,8 @@ export function buildObstacles(
         const count = Math.round(p.count);
         const spacing = 5.5;
         const thickness = 0.7;
-        const height = 2.2;
+        // Below the wall top, so a marble riding over one is not trapped.
+        const height = 1.6;
 
         const parts: Mesh[] = [];
         for (let i = 0; i < count; i++) {
@@ -229,7 +230,9 @@ export function buildObstacles(
           const side = i % 2 === 0 ? -1 : 1;
           // Reaches across at most half the channel, so the lane past its tip
           // is always wide enough for several marbles to stream through.
-          const reach = Math.max(1.0, Math.min(f.width * 0.55, f.width * 2 - MIN_CLEAR_LANE));
+          // A nudge, not a wall: roughly a third of the channel, leaving the
+          // rest clear. Long baffles were where marbles most often came to rest.
+          const reach = Math.max(1.0, Math.min(f.width * 0.38, f.width * 2 - MIN_CLEAR_LANE));
           const baffle = CreateBox(
             "baffle",
             { width: reach, height, depth: thickness },
