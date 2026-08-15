@@ -13,7 +13,8 @@
     "test:rest": "node scripts/rest-test.mjs",
     "tune": "node scripts/tune.mjs",
     "tune:flow": "node scripts/flow-sweep.mjs",
-    "tune:escapes": "node scripts/departures.mjs"
+    "tune:escapes": "node scripts/departures.mjs",
+    "tune:speed": "node scripts/speed-source.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "^7.54.3",

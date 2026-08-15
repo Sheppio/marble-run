@@ -69,6 +69,21 @@ and a marble that never loses energy accelerates forever. It is that
 coefficient which sets the shallowest gradient the track is allowed to have:
 a marble only moves off where `tanθ > (7/5)·Crr`.
 
+Speed comes from four places, only one of which is a choice: the gradient
+(real gravity on real geometry, a rolling sphere accelerating at
+`(5/7)·g·sinθ`), rolling resistance, energy lost to collisions with walls,
+obstacles and other marbles, and a drag ceiling. The ceiling is not physical —
+real air drag on a 16mm marble at this speed is around 0.01 m/s², which is
+nothing — so it is worth knowing how much it actually does. Removing it
+entirely only moves the mean from 0.39 to 0.52 m/s and the peak from 0.62 to
+0.87, because wall friction round the bends absorbs far more than it does
+(`npm run tune:speed`).
+
+Slowing the run by slackening the gradient instead does not work: the minimum
+slope is fixed by the rule that a resting marble must roll away, so flattening
+pushes the whole track onto that floor and marbles stall — that experiment
+dropped the finish rate to 76% and stretched races past ninety seconds.
+
 ## How tracks are generated
 
 A cursor walks downhill from the start gate. Each segment steers it — turns
@@ -121,6 +136,7 @@ npm run test:rest      # the "downhill everywhere" invariant
 npm run tune           # finish rates, rescue causes, flow speeds
 npm run tune:flow      # sweeps gradient against rolling resistance
 npm run tune:escapes   # classifies how marbles leave the channel
+npm run tune:speed     # how much of the speed is physics vs the drag ceiling
 ```
 
 `npm run tune` is the main one. It reports what fraction of marbles finish, how
