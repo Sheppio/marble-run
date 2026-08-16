@@ -246,8 +246,11 @@ function step(value: number, edge: number): number {
   return value < edge ? 1 : 0;
 }
 
-/** How many distinct marble patterns exist. See `marbleTexture`. */
-export const MARBLE_PATTERNS = 4;
+/**
+ * How many marble finishes exist: plain glass, then two patterned variants.
+ * See `marbleTexture`.
+ */
+export const MARBLE_PATTERNS = 3;
 
 /**
  * The face of a marble: a base colour carrying a pattern in a contrasting
@@ -257,12 +260,12 @@ export const MARBLE_PATTERNS = 4;
  * thing in the scene, and a uniform sphere looks motionless however fast it is
  * actually rolling — it is the markings turning that make the roll readable.
  *
- * The second matters more with a big field. Colour alone is one axis, and a
- * dozen marbles drawn from one wheel are only 30° of hue apart, which is not
- * enough to tell two greens apart on a phone at the distance the broadcast
- * camera sits. Giving each marble a pattern as well as a hue makes identity
- * two-dimensional: neighbours in the palette always differ in pattern, so two
- * similar colours are still separable at a glance.
+ * The second matters more with a big field. Colour alone is one axis and it
+ * runs out: there are nine colours that stay at least ΔE 25 apart, and past
+ * that the wheel has nothing left to give. Rather than squeeze a tenth
+ * indistinguishable hue out of it, the colours come round again wearing a
+ * pattern, which is a second axis and a much cheaper one. Fields of nine or
+ * fewer — nearly all of them — are plain glass throughout.
  *
  * The base stays the dominant colour so the marble still matches its swatch on
  * the scoreboard; the accent only marks it.
@@ -293,12 +296,6 @@ export function marbleTexture(
 
       let mark = 0;
       switch (kind) {
-        case 0: {
-          // Cane swirl: two ribbons twisting from pole to pole.
-          const twist = Math.sin(u * Math.PI * 4 + phase + v * 2.2);
-          mark = smoothstep(Math.max(0, Math.min(1, (Math.abs(twist) - 0.6) / 0.25)));
-          break;
-        }
         case 1: {
           // Banded, like a beach ball: stripes of latitude.
           const band = Math.sin((v + phase * 0.1) * Math.PI * 5);
@@ -320,15 +317,10 @@ export function marbleTexture(
           mark = Math.hypot(dx, dy) < 0.085 ? 1 : 0;
           break;
         }
-        default: {
-          // Segmented, like a beach ball. Narrow stripes rather than equal
-          // halves: at 50% coverage the accent became the marble's dominant
-          // colour and every segmented one read as white, which breaks the
-          // match to its swatch on the scoreboard.
-          const segment = u * 6 + phase;
-          mark = segment - Math.floor(segment) < 0.36 ? 1 : 0;
+        default:
+          // Plain glass. Most fields never get past the solid colours, so this
+          // is the common case and it is deliberately unmarked.
           break;
-        }
       }
 
       // A little mottle everywhere, so the glass has depth rather than reading

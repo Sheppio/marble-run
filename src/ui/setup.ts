@@ -208,7 +208,7 @@ export class SetupScreen {
 
     this.names.forEach((name, index) => {
       const swatch = el("span", { class: `swatch row-swatch swatch-p${patternFor(index)}` });
-      const swatchColour = colorFor(index, this.names.length);
+      const swatchColour = colorFor(index);
       swatch.style.background = swatchColour;
       swatch.style.setProperty("--swatch-accent", accentFor(swatchColour));
 

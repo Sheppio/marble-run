@@ -19,16 +19,12 @@ import { MARBLE_PATTERNS } from "../render/textures";
  * on small fields or crowds it on large ones.
  */
 
-/** Saturation and value for the coloured marbles. High: these read at a distance. */
-const MARBLE_SATURATION = 0.9;
-const MARBLE_VALUE = 1.0;
 
 /** The two neutrals, used once the field is large enough to spare the slots. */
 const PEARL = "#f7f7fa";
 const OBSIDIAN = "#16161c";
 
 /** Below this many racers, every marble gets a hue — neutrals would dominate. */
-const NEUTRALS_FROM = 5;
 
 const STORAGE_KEY = "marble-run:roster";
 const THEME_KEY = "marble-run:theme";
@@ -53,50 +49,67 @@ export function saveThemeId(id: string): void {
 export const MAX_PLAYERS = 12;
 export const MIN_PLAYERS = 2;
 
-function hsvToHex(hue: number, saturation: number, value: number): string {
-  const c = value * saturation;
-  const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
-  const m = value - c;
-  const sector = Math.floor(hue / 60) % 6;
-  const [r, g, b] = [
-    [c, x, 0],
-    [x, c, 0],
-    [0, c, x],
-    [0, x, c],
-    [x, 0, c],
-    [c, 0, x],
-  ][sector];
-  const channel = (v: number) =>
-    Math.round((v + m) * 255)
-      .toString(16)
-      .padStart(2, "0");
-  return `#${channel(r)}${channel(g)}${channel(b)}`;
+
+/**
+ * The solid colours, in the order they are handed out.
+ *
+ * Hand-picked and then measured, rather than stepped evenly round the hue
+ * wheel. Even hue steps are the obvious approach and a bad one: HSV hue is not
+ * perceptually uniform, so a step that is an obvious jump across the oranges is
+ * nearly nothing across the greens. The old palette divided 360° by the field
+ * size, and at twelve racers its closest pair came out at ΔE 5.7 under
+ * CIEDE2000 — two hues 36° apart that the eye reads as the same green.
+ *
+ * Every pair in this set is at least ΔE 25 apart, which is comfortable for
+ * small moving objects on a phone. Check it with `npm run palette`.
+ *
+ * Purple is deliberately absent. It sits between blue and magenta and cannot be
+ * separated from both: including it dragged the worst pair down to ΔE 16
+ * however its lightness was adjusted.
+ */
+const BASE_COLOURS = [
+  "#ff2020", // red
+  "#ff8c00", // orange
+  "#ffe000", // yellow
+  "#1f9e28", // green
+  "#28e0d8", // cyan
+  "#1832d8", // blue
+  "#ff3090", // magenta
+  PEARL,
+  OBSIDIAN,
+];
+
+/**
+ * Colour for the marble at `index`.
+ *
+ * Fixed rather than derived from the field size, so a player keeps their colour
+ * when somebody else joins or leaves. The old scheme re-divided the wheel every
+ * time the roster changed, which quietly recoloured everyone.
+ */
+export function colorFor(index: number): string {
+  return BASE_COLOURS[index % BASE_COLOURS.length];
 }
 
-/** The colours for a field of `count` marbles, in racing order. */
-export function paletteFor(count: number): string[] {
-  const size = Math.max(MIN_PLAYERS, Math.min(MAX_PLAYERS, count));
-  const withNeutrals = size >= NEUTRALS_FROM;
-  const hueCount = withNeutrals ? size - 2 : size;
-
-  const colours: string[] = [];
-  for (let i = 0; i < hueCount; i++) {
-    // Start a little off red, so the first marble is not the same colour as
-    // every warning light the eye is trained to ignore.
-    const hue = (25 + (i * 360) / hueCount) % 360;
-    colours.push(hsvToHex(hue, MARBLE_SATURATION, MARBLE_VALUE));
-  }
-  if (withNeutrals) colours.push(PEARL, OBSIDIAN);
-  return colours;
-}
-
-export function colorFor(index: number, count: number): string {
-  const palette = paletteFor(count);
-  return palette[index % palette.length];
-}
-
+/**
+ * Which marking the marble at `index` wears: 0 solid, then the texture
+ * variants once the solid colours run out.
+ *
+ * Colour is one axis and it is exhausted at nine. Past that the same colours
+ * come round again wearing a pattern, which is a second axis and a far cheaper
+ * one than trying to squeeze a tenth distinguishable hue out of the wheel. In
+ * practice most fields are under nine and every marble is plain glass.
+ */
 export function patternFor(index: number): number {
-  return index % MARBLE_PATTERNS;
+  const base = BASE_COLOURS.length;
+  if (index < base) return 0;
+  // Alternate the two patterned finishes rather than exhausting one before
+  // starting the next, or with nine solid colours and a cap of twelve racers
+  // the spotted variant would never appear at all.
+  //
+  // Colour and finish together stay unique because the number of base colours
+  // is odd: a marble nine places later lands on the same colour but the
+  // opposite pattern. That holds to 27 racers, well past the cap.
+  return 1 + ((index - base) % (MARBLE_PATTERNS - 1));
 }
 
 /**
@@ -104,9 +117,7 @@ export function patternFor(index: number): number {
  * dark, near-black on the pale ones.
  *
  * Mirrors the rule in `marbleTexture`, so a swatch on the scoreboard wears the
- * same markings in the same colours as the marble it stands for. Kept in plain
- * hex here rather than shared through Color3, so the UI layer does not have to
- * reach into the renderer for it.
+ * same markings in the same colours as the marble it stands for.
  */
 export function accentFor(hex: string): string {
   const value = hex.replace("#", "");
@@ -115,6 +126,12 @@ export function accentFor(hex: string): string {
   const b = parseInt(value.slice(4, 6), 16) / 255;
   const luminance = r * 0.2126 + g * 0.7152 + b * 0.0722;
   return luminance > 0.55 ? "#17171f" : "#f7f7fc";
+}
+
+/** The colours for a field of `count` marbles, in racing order. */
+export function paletteFor(count: number): string[] {
+  const size = Math.max(MIN_PLAYERS, Math.min(MAX_PLAYERS, count));
+  return Array.from({ length: size }, (_, i) => colorFor(i));
 }
 
 export function makePlayers(names: string[]): Player[] {

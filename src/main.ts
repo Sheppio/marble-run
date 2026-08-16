@@ -4,7 +4,14 @@ import { el } from "./ui/dom";
 import { SetupScreen } from "./ui/setup";
 import { Hud } from "./ui/hud";
 import { ResultsScreen } from "./ui/results";
-import { buildShareLink, loadThemeId, makePlayers, readShareLink } from "./ui/players";
+import {
+  buildShareLink,
+  loadThemeId,
+  makePlayers,
+  paletteFor,
+  patternFor,
+  readShareLink,
+} from "./ui/players";
 import { normaliseSeed, randomSeed } from "./core/seed";
 import { World, initPhysics } from "./game/world";
 import type { Standing } from "./game/race";
@@ -194,5 +201,10 @@ canvas.addEventListener("webglcontextlost", (event) => {
   event.preventDefault();
   showFatal("Graphics context lost", "Reload the page to start a new race.");
 });
+
+// Handle for the palette analysis script, which measures how far apart the
+// marble colours actually are in a perceptual colour space.
+(window as unknown as { __palette?: typeof paletteFor }).__palette = paletteFor;
+(window as unknown as { __pattern?: typeof patternFor }).__pattern = patternFor;
 
 void boot();

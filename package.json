@@ -18,7 +18,8 @@
     "tune:escapes": "node scripts/departures.mjs",
     "tune:speed": "node scripts/speed-source.mjs",
     "tune:baffles": "node scripts/baffle-sweep.mjs",
-    "tune:camera": "node scripts/camera-motion.mjs"
+    "tune:camera": "node scripts/camera-motion.mjs",
+    "palette": "node scripts/palette-check.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "^7.54.3",

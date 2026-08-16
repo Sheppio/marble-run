@@ -490,15 +490,9 @@ body {
   inset: 0;
 }
 
-/* Swirl: a diagonal ribbon. */
+/* Solid marbles get no marking, which is most of them. */
 .swatch-p0::after {
-  background: linear-gradient(
-    118deg,
-    transparent 30%,
-    var(--swatch-accent, #fff) 30%,
-    var(--swatch-accent, #fff) 50%,
-    transparent 50%
-  );
+  background: none;
 }
 
 /* Banded. */
@@ -519,49 +513,6 @@ body {
 /* Spotted. */
 .swatch-p2::after {
   background: radial-gradient(circle at 50% 50%, var(--swatch-accent, #fff) 32%, transparent 34%);
-}
-
-/* Segmented. */
-.swatch-p3::after {
-  background: conic-gradient(
-    var(--swatch-accent, #fff) 0deg 52deg,
-    transparent 52deg 120deg,
-    var(--swatch-accent, #fff) 120deg 172deg,
-    transparent 172deg 240deg,
-    var(--swatch-accent, #fff) 240deg 292deg,
-    transparent 292deg 360deg
-  );
-}
-
-.row-name {
-  font-size: 0.72rem;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.row-bar {
-  display: block;
-  height: 3px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.12);
-  overflow: hidden;
-}
-
-.row-bar-fill {
-  display: block;
-  height: 100%;
-  width: 0%;
-  border-radius: 2px;
-  transition: width 200ms linear;
-}
-
-.row-detail {
-  font-size: 0.62rem;
-  color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
 .hud-controls {
