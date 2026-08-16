@@ -192,6 +192,27 @@ export class BroadcastCamera {
     this.apply();
   }
 
+  /** The point the camera is currently looking at. */
+  get currentLook(): Vector3 {
+    return this.look.value;
+  }
+
+  /**
+   * Where the camera sits for the countdown: behind and above the grid, far
+   * enough back to hold the whole field and the first stretch of track.
+   */
+  gridFraming(): { eye: Vector3; look: Vector3 } {
+    const frame = this.geometry.frameAt(this.geometry.plan.startIndex);
+    const eye = frame.position
+      .subtract(frame.tangent.scale(26))
+      .add(frame.right.scale(7))
+      .add(new Vector3(0, 14, 0));
+    // Just ahead of the grid rather than well down the track, so the marbles
+    // sit in the middle of the frame instead of in a corner of it.
+    const look = frame.position.add(frame.tangent.scale(5));
+    return { eye, look };
+  }
+
   /** Places the camera instantly, skipping the smoothing. */
   snapTo(position: Vector3, target: Vector3): void {
     this.eye.reset(position);

@@ -39,6 +39,7 @@ import { getTheme, type Theme } from "../render/theme";
 import { detectQuality, type QualitySettings } from "./quality";
 import { BroadcastCamera } from "./camera";
 import { Race, FIXED_STEP, type RaceEvents } from "./race";
+import { smoothstep } from "./smoothing";
 import type { Player } from "./marble";
 import { GRAVITY, TRACK_CONSTANTS, type TrackPlan } from "../track/plan";
 
@@ -58,6 +59,20 @@ const TABLE_DROP = 14;
  * flag reads as a flag at the distance the broadcast camera sits.
  */
 const CHEQUER_CELL = 1.0;
+
+/** Stages of the pre-race sequence. */
+type IntroPhase = "none" | "sweep" | "return";
+
+/**
+ * How long the flythrough down the track takes, in seconds.
+ *
+ * Short on purpose. This runs before every race including rematches on the
+ * same track, and the whole sequence — sweep, return, then a three-second
+ * countdown — is about six seconds before anything moves.
+ */
+const SWEEP_SECONDS = 1.8;
+/** How long the camera takes to come back to the grid afterwards. */
+const RETURN_SECONDS = 0.9;
 
 /**
  * Test hook letting the basin test build a run without its end wall.
@@ -122,6 +137,12 @@ export class World {
   private gateOpenAmount = 0;
   private previewProgress = 0;
   private running = false;
+  private intro: IntroPhase = "none";
+  private introTime = 0;
+  private introSeconds = 3;
+  /** Camera pose at the moment the return leg began. */
+  private returnFromEye = new Vector3();
+  private returnFromLook = new Vector3();
 
   constructor(options: WorldOptions) {
     if (!havokInstance) {
@@ -566,9 +587,65 @@ export class World {
     );
   }
 
+  /**
+   * Runs the pre-race sequence: fly the track, come back to the grid, then
+   * count down.
+   *
+   * These used to happen at once — the flythrough played *over* the countdown —
+   * so at "GO" the camera was at the far end of the run and had to fly the
+   * whole way back with the race already under way. The start was over before
+   * you saw it. Doing it in order costs a couple of seconds but means the
+   * countdown ends with the camera already pointed at the grid.
+   */
   startCountdown(seconds = 3): void {
     this.previewProgress = 0;
-    this.race.beginCountdown(seconds);
+    this.introSeconds = seconds;
+    this.introTime = 0;
+    if (this.headless) {
+      // Nothing to look at, and the tuning harness runs thousands of these.
+      this.race.beginCountdown(seconds);
+      return;
+    }
+    this.intro = "sweep";
+  }
+
+  /**
+   * Advances the pre-race sequence, returning true while it still owns the
+   * camera.
+   */
+  private updateIntro(dt: number): boolean {
+    if (this.intro === "none") return false;
+    this.introTime += dt;
+
+    if (this.intro === "sweep") {
+      this.previewProgress = Math.min(1, this.introTime / SWEEP_SECONDS);
+      this.camera.previewAt(this.previewProgress);
+      if (this.previewProgress >= 1) {
+        // Capture the pose the sweep ended on, so the return leg can ease out
+        // of exactly where it is rather than jumping.
+        this.returnFromEye.copyFrom(this.camera.camera.position);
+        this.returnFromLook.copyFrom(this.camera.currentLook);
+        this.intro = "return";
+        this.introTime = 0;
+      }
+      return true;
+    }
+
+    // Returning: a straight eased blend back to the grid. Smoothstep rather
+    // than a spring, because this has to *finish* — the countdown starts the
+    // instant it does, and a spring only ever approaches its target.
+    const t = smoothstep(this.introTime / RETURN_SECONDS);
+    const { eye, look } = this.camera.gridFraming();
+    this.camera.snapTo(
+      Vector3.Lerp(this.returnFromEye, eye, t),
+      Vector3.Lerp(this.returnFromLook, look, t),
+    );
+
+    if (this.introTime >= RETURN_SECONDS) {
+      this.intro = "none";
+      this.race.beginCountdown(this.introSeconds);
+    }
+    return true;
   }
 
   /** Kicks off the render loop. */
@@ -578,10 +655,12 @@ export class World {
     this.engine.runRenderLoop(() => {
       const dt = Math.min(0.1, this.engine.getDeltaTime() / 1000);
 
-      if (this.race.state === "countdown") {
-        // Fly the length of the track while the countdown runs.
-        this.previewProgress = Math.min(1, this.previewProgress + dt * 0.34);
-        this.camera.previewAt(this.previewProgress);
+      if (this.updateIntro(dt)) {
+        // The intro owns the camera until it hands over to the countdown.
+      } else if (this.race.state === "countdown") {
+        // Hold the grid shot so the flag drops on a settled camera.
+        const { eye, look } = this.camera.gridFraming();
+        this.camera.snapTo(eye, look);
       } else if (this.race.state === "finished") {
         this.camera.finishShot(dt);
       } else if (this.race.state === "racing") {
