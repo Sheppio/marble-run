@@ -395,14 +395,44 @@ body {
 }
 
 .leaderboard {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(var(--board-rows, 6), auto);
   gap: 0.22rem;
   margin-top: 0.5rem;
   align-self: flex-end;
+  justify-self: end;
   /* Deliberately narrow: this sits on top of the race, and the race is the
      thing worth looking at. */
   width: min(190px, 47vw);
+}
+
+/* Two columns, filled top to bottom, so a full field takes half the height.
+   The board is the only thing on screen competing with the race itself, and
+   eight rows of it reached most of the way down a phone. */
+.leaderboard-split {
+  grid-template-columns: 1fr 1fr;
+  width: min(340px, 82vw);
+  gap: 0.22rem 0.3rem;
+}
+
+/* Tighter in split mode: two columns cost width, so the rows give some back. */
+.leaderboard-split .board-row {
+  gap: 0.28rem;
+  padding: 0.16rem 0.32rem;
+}
+
+.leaderboard-split .row-place {
+  width: 0.9rem;
+  font-size: 0.66rem;
+}
+
+.leaderboard-split .row-name {
+  font-size: 0.68rem;
+}
+
+.leaderboard-split .row-detail {
+  font-size: 0.58rem;
 }
 
 .board-row {

@@ -10,6 +10,9 @@ import type { Standing } from "../game/race";
  * flickering, and there is no per-frame allocation churn.
  */
 
+/** Field size at which the board splits into two columns. */
+const TWO_COLUMN_FROM = 5;
+
 export interface HudCallbacks {
   onCycleCamera(): string;
   onSkip(): void;
@@ -30,6 +33,8 @@ export class Hud {
   private countdownNode!: HTMLElement;
   private cameraButton!: HTMLButtonElement;
   private rows = new Map<number, Row>();
+  /** Field size the board is currently laid out for. */
+  private laidOutFor = -1;
 
   constructor(
     seed: string,
@@ -93,6 +98,8 @@ export class Hud {
   }
 
   update(standings: Standing[]): void {
+    this.layoutFor(standings.length);
+
     for (const standing of standings) {
       const { marble } = standing;
       let row = this.rows.get(marble.player.id);
@@ -135,7 +142,31 @@ export class Hud {
     }
   }
 
+  /**
+   * Splits the board into two columns once the field is big enough.
+   *
+   * A single column of eight rows runs most of the way down a phone screen and
+   * covers the race it is reporting on. Two columns of four take the same
+   * information and give back half the height, which on the shot that matters —
+   * a marble mid-corner, filling the frame — is the difference between seeing
+   * it and not. Below five racers a single column is already short, and
+   * splitting it just makes the board wider for no gain.
+   */
+  private layoutFor(count: number): void {
+    if (count === this.laidOutFor) return;
+    this.laidOutFor = count;
+    const twoColumns = count >= TWO_COLUMN_FROM;
+    this.boardNode.classList.toggle("leaderboard-split", twoColumns);
+    // Columns are filled top to bottom, so 1st sits above 2nd rather than
+    // beside it and the ranking still reads down the page.
+    this.boardNode.style.setProperty(
+      "--board-rows",
+      String(twoColumns ? Math.ceil(count / 2) : count),
+    );
+  }
+
   reset(): void {
+    this.laidOutFor = -1;
     clear(this.boardNode);
     this.rows.clear();
   }

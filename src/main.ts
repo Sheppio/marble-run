@@ -119,6 +119,10 @@ async function startRace(): Promise<void> {
   }
 
   const activeWorld = world;
+  // Handle for the measurement scripts, which need to read the camera's actual
+  // per-frame motion. Harmless in production and the alternative is threading a
+  // instrumentation seam through the render loop.
+  (window as unknown as { __world?: World }).__world = activeWorld;
 
   hud = new Hud(seed, {
     onCycleCamera: () => activeWorld.camera.cycleMode(),
