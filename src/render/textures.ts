@@ -1,4 +1,5 @@
 import { Constants } from "@babylonjs/core/Engines/constants";
+import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { RawTexture } from "@babylonjs/core/Materials/Textures/rawTexture";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import type { Scene } from "@babylonjs/core/scene";
@@ -245,21 +246,44 @@ function step(value: number, edge: number): number {
   return value < edge ? 1 : 0;
 }
 
+/** How many distinct marble patterns exist. See `marbleTexture`. */
+export const MARBLE_PATTERNS = 4;
+
 /**
- * The swirl inside a glass marble.
+ * The face of a marble: a base colour carrying a pattern in a contrasting
+ * accent.
  *
- * A plain coloured sphere is the single most toy-like thing in the scene: real
- * marbles have a ribbon of colour suspended in clear glass, and it is the way
- * that ribbon turns as the marble rolls that makes the roll readable at all. A
- * uniform sphere can spin at any speed and look completely static.
+ * Two jobs. The first is that a plain coloured sphere is the most toy-like
+ * thing in the scene, and a uniform sphere looks motionless however fast it is
+ * actually rolling — it is the markings turning that make the roll readable.
  *
- * Returned as a standalone albedo map rather than a `DetailMaps`, since glass
- * has no relief to go with it.
+ * The second matters more with a big field. Colour alone is one axis, and a
+ * dozen marbles drawn from one wheel are only 30° of hue apart, which is not
+ * enough to tell two greens apart on a phone at the distance the broadcast
+ * camera sits. Giving each marble a pattern as well as a hue makes identity
+ * two-dimensional: neighbours in the palette always differ in pattern, so two
+ * similar colours are still separable at a glance.
+ *
+ * The base stays the dominant colour so the marble still matches its swatch on
+ * the scoreboard; the accent only marks it.
  */
-export function marbleSwirl(scene: Scene, id: number): RawTexture {
+export function marbleTexture(
+  scene: Scene,
+  id: number,
+  base: Color3,
+  pattern: number,
+): RawTexture {
   const size = 128;
   const data = new Uint8Array(size * size * 4);
-  // Each player's marble gets its own swirl, so no two are identical.
+
+  // White on anything dark, near-black on the pale ones — otherwise the
+  // markings on the white marble are invisible and it reads as a blank sphere.
+  const luminance = base.r * 0.2126 + base.g * 0.7152 + base.b * 0.0722;
+  const accent =
+    luminance > 0.55 ? new Color3(0.09, 0.09, 0.13) : new Color3(0.97, 0.97, 1);
+
+  const kind = ((pattern % MARBLE_PATTERNS) + MARBLE_PATTERNS) % MARBLE_PATTERNS;
+  // Rotates each marble's markings so two with the same pattern still differ.
   const phase = (id * 2.399) % (Math.PI * 2);
 
   for (let y = 0; y < size; y++) {
@@ -267,29 +291,62 @@ export function marbleSwirl(scene: Scene, id: number): RawTexture {
       const u = x / size;
       const v = y / size;
 
-      // Two broad ribbons twisting around the sphere. Working in UV space means
-      // they converge at the poles, which is roughly what a real cane swirl
-      // does anyway.
-      const twist = Math.sin(u * Math.PI * 2 * 2 + phase + v * 2.2);
-      const band = Math.abs(twist);
-      const ribbon = smoothstep(Math.max(0, Math.min(1, (band - 0.25) / 0.45)));
+      let mark = 0;
+      switch (kind) {
+        case 0: {
+          // Cane swirl: two ribbons twisting from pole to pole.
+          const twist = Math.sin(u * Math.PI * 4 + phase + v * 2.2);
+          mark = smoothstep(Math.max(0, Math.min(1, (Math.abs(twist) - 0.6) / 0.25)));
+          break;
+        }
+        case 1: {
+          // Banded, like a beach ball: stripes of latitude.
+          const band = Math.sin((v + phase * 0.1) * Math.PI * 5);
+          mark = smoothstep(Math.max(0, Math.min(1, (Math.abs(band) - 0.55) / 0.2)));
+          break;
+        }
+        case 2: {
+          // Spotted. Distance to the nearest cell centre in a coarse grid,
+          // jittered so the dots do not line up into rows.
+          const cells = 5;
+          const cx = Math.floor(u * cells);
+          const cy = Math.floor(v * cells);
+          const jitterX = hash2(cx + phase, cy) * 0.5 + 0.25;
+          const jitterY = hash2(cy, cx + phase) * 0.5 + 0.25;
+          const dx = (u * cells - cx - jitterX) / cells;
+          // Latitude is squeezed near the poles on a sphere; without this the
+          // dots stretch into ovals top and bottom.
+          const dy = ((v * cells - cy - jitterY) / cells) * 0.6;
+          mark = Math.hypot(dx, dy) < 0.085 ? 1 : 0;
+          break;
+        }
+        default: {
+          // Segmented, like a beach ball. Narrow stripes rather than equal
+          // halves: at 50% coverage the accent became the marble's dominant
+          // colour and every segmented one read as white, which breaks the
+          // match to its swatch on the scoreboard.
+          const segment = u * 6 + phase;
+          mark = segment - Math.floor(segment) < 0.36 ? 1 : 0;
+          break;
+        }
+      }
 
-      const cloud = fbm(u, v, 6, 3);
+      // A little mottle everywhere, so the glass has depth rather than reading
+      // as painted plastic.
+      const cloud = fbm(u, v, 6, 3) * 0.16 + 0.92;
+      const r = (base.r * (1 - mark) + accent.r * mark) * cloud;
+      const g = (base.g * (1 - mark) + accent.g * mark) * cloud;
+      const b = (base.b * (1 - mark) + accent.b * mark) * cloud;
 
-      // White where the glass is clear, mid-grey in the ribbon: the material
-      // multiplies this by the player's colour, so bright means "show the
-      // colour" and dark means "clear glass with a highlight".
-      const shade = 0.35 + ribbon * 0.62 + cloud * 0.12;
-      const byte = Math.round(Math.max(0, Math.min(1, shade)) * 255);
       const i = (y * size + x) * 4;
-      data[i] = byte;
-      data[i + 1] = byte;
-      data[i + 2] = byte;
+      data[i] = Math.round(Math.max(0, Math.min(1, r)) * 255);
+      data[i + 1] = Math.round(Math.max(0, Math.min(1, g)) * 255);
+      data[i + 2] = Math.round(Math.max(0, Math.min(1, b)) * 255);
       data[i + 3] = 255;
     }
   }
 
-  return raw(scene, `swirl-${id}`, data, size);
+  return raw(scene, `marble-${id}`, data, size);
 }
 
 /**

@@ -67,10 +67,10 @@ export function createMarbleMaterial(
   const material = createSurface(scene, name, color, finish);
   material.emissiveColor = color.scale(finish.emissive);
   if (swirl) {
-    // Greyscale, multiplying the player's colour: bright texels show the colour
-    // of the cane, dark ones read as clear glass. A marble with no swirl is a
-    // uniform sphere, and a uniform sphere looks motionless however fast it is
-    // actually rolling — the swirl is what makes the roll visible.
+    // The texture already carries the player's colour and its markings, so the
+    // base has to go white or the colour is applied twice and every marble
+    // renders a shade of its own hue too dark and too saturated.
+    material.albedoColor = Color3.White();
     material.albedoTexture = swirl;
   }
   if (finish.sheen > 0) {

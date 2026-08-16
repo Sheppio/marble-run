@@ -405,19 +405,18 @@ body {
      and the bottom is close to free. */
   margin-top: auto;
   margin-bottom: 0.45rem;
-  align-self: flex-end;
-  justify-self: end;
-  /* Deliberately narrow: this sits on top of the race, and the race is the
-     thing worth looking at. */
-  width: min(190px, 47vw);
+  /* Full width. It sits at the bottom over ground the camera has already
+     passed, so width costs nothing there, and spreading the rows out means
+     long names fit and the gap figures stop being cramped against them. */
+  width: 100%;
 }
 
-/* Two columns, filled top to bottom, so a full field takes half the height.
-   The board is the only thing on screen competing with the race itself, and
-   eight rows of it reached most of the way down a phone. */
+/* Columns filled top to bottom, so a full field takes a fraction of the
+   height: two columns from five racers, three from nine. The board is the only
+   thing on screen competing with the race itself, and twelve rows of it
+   reached most of the way down a phone. */
 .leaderboard-split {
-  grid-template-columns: 1fr 1fr;
-  width: min(340px, 82vw);
+  grid-template-columns: repeat(var(--board-columns, 2), 1fr);
   gap: 0.22rem 0.3rem;
 }
 
@@ -468,19 +467,70 @@ body {
 }
 
 .row-swatch {
-  width: 13px;
-  height: 13px;
-  min-width: 13px;
+  width: 15px;
+  height: 15px;
+  min-width: 15px;
   border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, 0.4);
+  position: relative;
+  overflow: hidden;
 }
 
-.row-body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+/* Miniatures of the four marble markings, so a name can be matched to a marble
+   by its pattern when two hues are close. Drawn with gradients rather than
+   glyphs so they stay crisp at this size, and in the same accent the marble's
+   own texture uses, so a pale marble gets dark markings and vice versa.
+
+   An earlier pass drew these with mix-blend-mode: overlay, which washed every
+   swatch towards grey — the white and black marbles became indistinguishable
+   from each other, which is precisely the problem these exist to solve. */
+.row-swatch::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+/* Swirl: a diagonal ribbon. */
+.swatch-p0::after {
+  background: linear-gradient(
+    118deg,
+    transparent 30%,
+    var(--swatch-accent, #fff) 30%,
+    var(--swatch-accent, #fff) 50%,
+    transparent 50%
+  );
+}
+
+/* Banded. */
+.swatch-p1::after {
+  background: linear-gradient(
+    to bottom,
+    transparent 26%,
+    var(--swatch-accent, #fff) 26%,
+    var(--swatch-accent, #fff) 42%,
+    transparent 42%,
+    transparent 62%,
+    var(--swatch-accent, #fff) 62%,
+    var(--swatch-accent, #fff) 78%,
+    transparent 78%
+  );
+}
+
+/* Spotted. */
+.swatch-p2::after {
+  background: radial-gradient(circle at 50% 50%, var(--swatch-accent, #fff) 32%, transparent 34%);
+}
+
+/* Segmented. */
+.swatch-p3::after {
+  background: conic-gradient(
+    var(--swatch-accent, #fff) 0deg 52deg,
+    transparent 52deg 120deg,
+    var(--swatch-accent, #fff) 120deg 172deg,
+    transparent 172deg 240deg,
+    var(--swatch-accent, #fff) 240deg 292deg,
+    transparent 292deg 360deg
+  );
 }
 
 .row-name {

@@ -1,4 +1,5 @@
 import { el, formatTime, ordinal } from "./dom";
+import { accentFor } from "./players";
 import type { Standing } from "../game/race";
 
 /**
@@ -60,8 +61,9 @@ export class ResultsScreen {
     const leaderStanding = standings[0];
     const rows = standings.map((standing) => {
       const marble = standing.marble;
-      const swatch = el("span", { class: "row-swatch" });
+      const swatch = el("span", { class: `row-swatch swatch-p${marble.player.pattern}` });
       swatch.style.background = marble.player.color;
+      swatch.style.setProperty("--swatch-accent", accentFor(marble.player.color));
 
       const gap =
         marble.finishTime !== null && leaderStanding.marble.finishTime !== null && standing.place > 1

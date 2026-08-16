@@ -8,8 +8,6 @@ import { buildShareLink, loadThemeId, makePlayers, readShareLink } from "./ui/pl
 import { normaliseSeed, randomSeed } from "./core/seed";
 import { World, initPhysics } from "./game/world";
 import type { Standing } from "./game/race";
-import type { PhysicsEngine as PhysicsEngineV2 } from "@babylonjs/core/Physics/v2/physicsEngine";
-import type { IPhysicsEnginePluginV2 } from "@babylonjs/core/Physics/v2/IPhysicsEnginePlugin";
 
 /**
  * App shell: owns the screen the player is looking at and the world behind it.
@@ -126,11 +124,6 @@ async function startRace(): Promise<void> {
 
   hud = new Hud(seed, {
     onCycleCamera: () => activeWorld.camera.cycleMode(),
-    onSkip: () => {
-      // Fast-forward rather than jumping: run the simulation flat out with no
-      // rendering until the race resolves, so the result is still the real one.
-      fastForward(activeWorld);
-    },
   });
   showScreen(hud);
 
@@ -141,38 +134,6 @@ async function startRace(): Promise<void> {
   });
 
   activeWorld.startCountdown(3);
-}
-
-/**
- * Runs the remaining simulation as fast as the CPU allows.
- *
- * The race still plays out under the same physics, so skipping never changes
- * who wins — it only stops you watching it happen.
- */
-function fastForward(activeWorld: World): void {
-  const race = activeWorld.race;
-  if (!race.isRunning()) return;
-
-  const deadline = performance.now() + 4000;
-  // Physics v2 exposes the live body list, which the base interface does not.
-  const physicsEngine = activeWorld.scene.getPhysicsEngine() as PhysicsEngineV2 | null;
-  if (!physicsEngine) {
-    race.forceComplete();
-    return;
-  }
-
-  const bodies = physicsEngine.getBodies();
-  const plugin = physicsEngine.getPhysicsPlugin() as IPhysicsEnginePluginV2;
-  const stepSeconds = physicsEngine.getTimeStep();
-
-  while (race.isRunning() && performance.now() < deadline) {
-    activeWorld.scene.onBeforePhysicsObservable.notifyObservers(activeWorld.scene);
-    plugin?.executeStep(stepSeconds, bodies);
-    activeWorld.scene.onAfterPhysicsObservable.notifyObservers(activeWorld.scene);
-  }
-
-  // If four seconds of raw stepping still hasn't resolved it, rank as it stands.
-  if (race.isRunning()) race.forceComplete();
 }
 
 function showResults(standings: Standing[]): void {

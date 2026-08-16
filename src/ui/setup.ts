@@ -1,6 +1,8 @@
 import { clear, el } from "./dom";
 import {
   MAX_PLAYERS,
+  patternFor,
+  accentFor,
   MIN_PLAYERS,
   buildShareLink,
   colorFor,
@@ -205,8 +207,10 @@ export class SetupScreen {
     clear(this.listNode);
 
     this.names.forEach((name, index) => {
-      const swatch = el("span", { class: "swatch" });
-      swatch.style.background = colorFor(index, this.names.length);
+      const swatch = el("span", { class: `swatch row-swatch swatch-p${patternFor(index)}` });
+      const swatchColour = colorFor(index, this.names.length);
+      swatch.style.background = swatchColour;
+      swatch.style.setProperty("--swatch-accent", accentFor(swatchColour));
 
       const input = el("input", {
         class: "racer-input",

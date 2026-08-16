@@ -127,28 +127,24 @@ const BAFFLE_LEAN = 0.55;
 
 /**
  * How far a baffle reaches across the channel, as a multiple of the channel's
- * half-width — so 0.7 blocks about a third of the full channel and 1.05
- * blocks slightly more than half.
+ * half-width — so 0.85 blocks a bit over 40% of the full channel.
  *
- * This, not the angle, is the control on how much trouble baffles cause, and
- * it is close to linear. `npm run tune:baffles -- --knob baffleReach`, 60
- * seeds each:
+ * This was cut to 0.7 from 1.05 to buy down stalls, back when the sweep angle
+ * was still too shallow. That was treating the symptom: with the sweep fixed,
+ * re-measuring at 60 seeds each shows most of the reach is affordable again.
  *
- *   0.55   97.2% finish   86.7% all home   1.5 rescues    51 baffle stalls
- *   0.70   94.7%          76.7%            2.2            92
- *   0.85   92.2%          70.0%            3.5           156
- *   1.05   91.1%          71.7%            4.5           182
+ *   0.70   99.2% finish   95.0% all home   0.7 rescues    8 baffle stalls
+ *   0.85   99.4%          96.7%            0.8           17
+ *   1.05   97.5%          86.7%            1.4           39
+ *   1.25   95.6%          80.0%            1.7           54
  *
- * 1.05 reached past the centreline and made the field funnel through a single
- * gap, which bunches marbles up beautifully and is also what had one in four
- * races needing a marble helped off a baffle. 0.7 halves the stalls and still
- * blocks a third of the channel, which is enough to shuffle the order.
- *
- * The bunching is genuinely good to watch, so this is a taste call as much as
- * a measurement: the numbers say where each setting lands, not which one is
- * right.
+ * 0.85 is better than 0.70 on both finish rate and races with everyone home
+ * while blocking more of the channel, so it is a free return of some of the
+ * bunching. Past that it starts costing again: 1.05 is much healthier than it
+ * used to be but still gives up two points of finish rate and doubles the
+ * interventions, which is a taste call rather than an obvious win.
  */
-const BAFFLE_REACH = 0.7;
+const BAFFLE_REACH = 0.85;
 
 /** Contact friction between a marble and a baffle face. Measured below. */
 const BAFFLE_FRICTION = 0.35;

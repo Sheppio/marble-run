@@ -1,4 +1,5 @@
 import type { Player } from "../game/marble";
+import { MARBLE_PATTERNS } from "../render/textures";
 
 /**
  * Racer roster: colours, defaults, and remembering names between visits.
@@ -94,10 +95,33 @@ export function colorFor(index: number, count: number): string {
   return palette[index % palette.length];
 }
 
+export function patternFor(index: number): number {
+  return index % MARBLE_PATTERNS;
+}
+
+/**
+ * The contrasting tone a marble's markings are drawn in: white on anything
+ * dark, near-black on the pale ones.
+ *
+ * Mirrors the rule in `marbleTexture`, so a swatch on the scoreboard wears the
+ * same markings in the same colours as the marble it stands for. Kept in plain
+ * hex here rather than shared through Color3, so the UI layer does not have to
+ * reach into the renderer for it.
+ */
+export function accentFor(hex: string): string {
+  const value = hex.replace("#", "");
+  const r = parseInt(value.slice(0, 2), 16) / 255;
+  const g = parseInt(value.slice(2, 4), 16) / 255;
+  const b = parseInt(value.slice(4, 6), 16) / 255;
+  const luminance = r * 0.2126 + g * 0.7152 + b * 0.0722;
+  return luminance > 0.55 ? "#17171f" : "#f7f7fc";
+}
+
 export function makePlayers(names: string[]): Player[] {
   const palette = paletteFor(names.length);
   return names.map((name, i) => ({
     id: i,
+    pattern: patternFor(i),
     name: name.trim() || `Racer ${i + 1}`,
     color: palette[i % palette.length],
   }));

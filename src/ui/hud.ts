@@ -1,4 +1,5 @@
 import { clear, el, formatDistance, formatTime } from "./dom";
+import { accentFor } from "./players";
 import type { Standing } from "../game/race";
 
 /**
@@ -10,12 +11,12 @@ import type { Standing } from "../game/race";
  * flickering, and there is no per-frame allocation churn.
  */
 
-/** Field size at which the board splits into two columns. */
+/** Field sizes at which the board gains another column. */
 const TWO_COLUMN_FROM = 5;
+const THREE_COLUMN_FROM = 9;
 
 export interface HudCallbacks {
   onCycleCamera(): string;
-  onSkip(): void;
 }
 
 interface Row {
@@ -66,15 +67,12 @@ export class Hud {
       this.cameraButton.textContent = this.callbacks.onCycleCamera();
     });
 
-    const skipButton = el("button", { class: "btn btn-hud", type: "button", text: "Skip to result" });
-    skipButton.addEventListener("click", () => this.callbacks.onSkip());
-
     this.countdownNode = el("div", { class: "countdown" });
 
     this.root.append(
       topBar,
       this.boardNode,
-      el("div", { class: "hud-controls" }, [this.cameraButton, skipButton]),
+      el("div", { class: "hud-controls" }, [this.cameraButton]),
       this.countdownNode,
     );
   }
@@ -106,8 +104,12 @@ export class Hud {
 
       if (!row) {
         const place = el("span", { class: "row-place" });
-        const swatch = el("span", { class: "row-swatch" });
+        // Carries the pattern as well as the colour. With a big field the
+        // colours alone are close, and a swatch that only showed hue would be
+        // no more tellable apart than the marbles it is meant to identify.
+        const swatch = el("span", { class: `row-swatch swatch-p${marble.player.pattern}` });
         swatch.style.background = marble.player.color;
+        swatch.style.setProperty("--swatch-accent", accentFor(marble.player.color));
         const name = el("span", { class: "row-name", text: marble.player.name });
         const detail = el("span", { class: "row-detail" });
         const bar = el("span", { class: "row-bar-fill" });
@@ -146,23 +148,21 @@ export class Hud {
    * Splits the board into two columns once the field is big enough.
    *
    * A single column of eight rows runs most of the way down a phone screen and
-   * covers the race it is reporting on. Two columns of four take the same
-   * information and give back half the height, which on the shot that matters —
-   * a marble mid-corner, filling the frame — is the difference between seeing
-   * it and not. Below five racers a single column is already short, and
-   * splitting it just makes the board wider for no gain.
+   * covers the race it is reporting on. Splitting it gives that height back:
+   * two columns from five racers, three from nine, so a full field of twelve
+   * is four rows rather than twelve. Below five a single column is already
+   * short, and splitting it would only cost width for no gain.
    */
   private layoutFor(count: number): void {
     if (count === this.laidOutFor) return;
     this.laidOutFor = count;
-    const twoColumns = count >= TWO_COLUMN_FROM;
-    this.boardNode.classList.toggle("leaderboard-split", twoColumns);
+
+    const columns = count >= THREE_COLUMN_FROM ? 3 : count >= TWO_COLUMN_FROM ? 2 : 1;
+    this.boardNode.classList.toggle("leaderboard-split", columns > 1);
+    this.boardNode.style.setProperty("--board-columns", String(columns));
     // Columns are filled top to bottom, so 1st sits above 2nd rather than
     // beside it and the ranking still reads down the page.
-    this.boardNode.style.setProperty(
-      "--board-rows",
-      String(twoColumns ? Math.ceil(count / 2) : count),
-    );
+    this.boardNode.style.setProperty("--board-rows", String(Math.ceil(count / columns)));
   }
 
   reset(): void {

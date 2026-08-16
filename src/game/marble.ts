@@ -11,7 +11,7 @@ import {
 import type { Scene } from "@babylonjs/core/scene";
 import { TRACK_CONSTANTS } from "../track/plan";
 import { createMarbleMaterial } from "../render/materials";
-import { marbleSwirl } from "../render/textures";
+import { marbleTexture } from "../render/textures";
 import type { Theme } from "../render/theme";
 
 export interface Player {
@@ -19,6 +19,11 @@ export interface Player {
   name: string;
   /** Hex colour, e.g. "#ff5c4d". */
   color: string;
+  /**
+   * Which marking this marble wears. Neighbours in the palette always get
+   * different ones, so two similar hues stay tellable apart.
+   */
+  pattern: number;
 }
 
 /**
@@ -111,7 +116,9 @@ export class Marble {
     this.mesh.position.copyFrom(position);
     this.mesh.isPickable = false;
 
-    this.swirl = swirl ? marbleSwirl(scene, player.id) : null;
+    this.swirl = swirl
+      ? marbleTexture(scene, player.id, Color3.FromHexString(player.color), player.pattern)
+      : null;
     this.mesh.material = createMarbleMaterial(
       scene,
       `marble-mat-${player.id}`,
