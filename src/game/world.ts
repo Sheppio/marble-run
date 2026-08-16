@@ -28,6 +28,7 @@ import { createEnvironment, type WorldLighting } from "../render/environment";
 import { applyDetail, createSurface } from "../render/materials";
 import {
   chequerTexture,
+  fitChequer,
   grassDetail,
   panelDetail,
   plasticDetail,
@@ -51,6 +52,12 @@ import { GRAVITY, TRACK_CONSTANTS, type TrackPlan } from "../track/plan";
 
 /** How far below the lowest point of the run its supporting surface sits. */
 const TABLE_DROP = 14;
+
+/**
+ * Target size of one chequer cell, in cm — a bit larger than a marble, so the
+ * flag reads as a flag at the distance the broadcast camera sits.
+ */
+const CHEQUER_CELL = 1.0;
 
 /**
  * Test hook letting the basin test build a run without its end wall.
@@ -312,19 +319,28 @@ export class World {
       glow: this.theme.bloom ? 0.7 : undefined,
     });
 
+    const width = frame.width * 2.6;
+
     // The posts stay plain; only the banner and the line on the deck are
     // chequered, so the flag reads without the whole gantry turning into a
     // pattern.
-    const chequer = chequerTexture(this.scene);
-    this.extraTextures.push(chequer);
-    const flagMaterial = createSurface(this.scene, "finish-flag-mat", Color3.White(), {
-      metallic: 0.05,
-      roughness: 0.45,
-      glow: this.theme.bloom ? 0.5 : undefined,
-    });
-    flagMaterial.albedoTexture = chequer;
-
-    const width = frame.width * 2.6;
+    //
+    // They get a texture each rather than sharing one, because the tiling has
+    // to be worked out from each face's own proportions and the two are
+    // different shapes — the banner stands 2.1cm tall, the deck stripe is
+    // 1.8cm deep.
+    const flagMaterial = (name: string, faceWidth: number, faceHeight: number, swap = false) => {
+      const chequer = chequerTexture(this.scene);
+      fitChequer(chequer, faceWidth, faceHeight, CHEQUER_CELL, { swapAxes: swap });
+      this.extraTextures.push(chequer);
+      const material = createSurface(this.scene, name, Color3.White(), {
+        metallic: 0.05,
+        roughness: 0.45,
+        glow: this.theme.bloom ? 0.5 : undefined,
+      });
+      material.albedoTexture = chequer;
+      return material;
+    };
     for (const side of [-1, 1]) {
       const post = CreateCylinder(
         "finish-post",
@@ -340,18 +356,31 @@ export class World {
       this.decor.push(post);
     }
 
-    const banner = CreateBox("finish-banner", { width, height: 2.1, depth: 0.2 }, this.scene);
+    const bannerHeight = 2.1;
+    const banner = CreateBox(
+      "finish-banner",
+      { width, height: bannerHeight, depth: 0.2 },
+      this.scene,
+    );
     banner.rotationQuaternion = rotation.clone();
     banner.position = frame.position.add(frame.up.scale(10));
-    banner.material = flagMaterial;
+    banner.material = flagMaterial("finish-flag-mat", width, bannerHeight);
     banner.isPickable = false;
     this.decor.push(banner);
 
-    // A chequered strip on the floor, so the line reads from any angle.
-    const stripe = CreateBox("finish-stripe", { width, height: 0.1, depth: 1.8 }, this.scene);
+    // A chequered strip on the floor, so the line reads from any angle. Its
+    // visible face is the top, so the tiling is fitted to width x depth.
+    const stripeDepth = 1.8;
+    const stripe = CreateBox(
+      "finish-stripe",
+      { width, height: 0.1, depth: stripeDepth },
+      this.scene,
+    );
     stripe.rotationQuaternion = rotation.clone();
     stripe.position = frame.position.add(frame.up.scale(0.07));
-    stripe.material = flagMaterial;
+    // Swapped: the deck strip is read off the box's top face, whose UVs run a
+    // quarter turn from the upright faces the banner uses.
+    stripe.material = flagMaterial("finish-stripe-mat", width, stripeDepth, true);
     stripe.isPickable = false;
     this.decor.push(stripe);
   }

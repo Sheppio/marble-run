@@ -297,8 +297,12 @@ export function marbleSwirl(scene: Scene, id: number): RawTexture {
  *
  * Returned as a colour map rather than a greyscale detail map, because unlike
  * grain or grass this is meant to override the surface's colour entirely.
+ *
+ * Two squares by default — the smallest repeating unit of a chequer — because
+ * the number of cells that end up on a face is set by tiling it with
+ * `fitChequer`, not by the resolution of the texture.
  */
-export function chequerTexture(scene: Scene, squares = 8): RawTexture {
+export function chequerTexture(scene: Scene, squares = 2): RawTexture {
   const size = 128;
   const data = new Uint8Array(size * size * 4);
   const cell = size / squares;
@@ -318,4 +322,41 @@ export function chequerTexture(scene: Scene, squares = 8): RawTexture {
   }
 
   return raw(scene, "chequer", data, size);
+}
+
+/**
+ * Tiles a chequer so its cells come out square on a face of `width` x `height`
+ * world units.
+ *
+ * A box gives every face the same 0..1 UV square regardless of its proportions,
+ * so a texture laid on the finish banner — twenty centimetres wide and two
+ * high — arrives stretched about ten to one, and the chequer reads as stripes.
+ * Repeats are rounded to whole numbers so the pattern still wraps without a cut
+ * cell at the seam, which leaves the cells within a few percent of square
+ * rather than exactly square. That is far below what the eye picks up; a
+ * visible seam is not.
+ */
+export function fitChequer(
+  texture: RawTexture,
+  width: number,
+  height: number,
+  targetCell: number,
+  options: { swapAxes?: boolean; squares?: number } = {},
+): void {
+  const squares = options.squares ?? 2;
+  const rows = Math.max(1, Math.round(height / (squares * targetCell)));
+  const cell = height / (squares * rows);
+  const columns = Math.max(1, Math.round(width / (squares * cell)));
+  // A box's upright faces run U across their width and V up their height, but
+  // its top face runs U along the depth and V along the width — a quarter turn
+  // from the others. Determined by rendering it: fitted the same way as the
+  // banner, the strip on the deck came out as fine lines along the track
+  // instead of squares across it.
+  if (options.swapAxes) {
+    texture.uScale = rows;
+    texture.vScale = columns;
+  } else {
+    texture.uScale = columns;
+    texture.vScale = rows;
+  }
 }
