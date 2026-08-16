@@ -2,6 +2,7 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
 import type { TrackGeometry } from "../track/geometry";
 import { latticeOffsets, type ForceZone } from "../track/obstacles";
+import { Rng } from "../core/rng";
 import { Marble, type Player } from "./marble";
 import { getTheme, type Theme } from "../render/theme";
 import {
@@ -140,6 +141,17 @@ export class Race {
    * together than a marble is wide, so aligned rows spawned slightly
    * interpenetrating and shoved each other apart at the flag. Offset by half a
    * space, the diagonal between neighbours is comfortably clear.
+   *
+   * Who stands where is drawn from the seed rather than taken from the order
+   * the names were typed in. The grid is not neutral — the front row is nearer
+   * the finish and gets away cleanly, while the back rows have to find a way
+   * through — so filling it in roster order handed the first names typed a real
+   * advantage. It also put every solid-coloured marble at the front and every
+   * patterned one at the back, since the palette hands out solids first.
+   *
+   * Drawing from the seed rather than from Math.random keeps the promise the
+   * whole app is built on: the same seed and the same roster give the same race
+   * every time, grid included.
    */
   private spawnMarbles(players: Player[]): void {
     const startFrame = this.geometry.frameAt(this.geometry.plan.startIndex);
@@ -159,6 +171,15 @@ export class Race {
       placed += row.length;
     }
 
+    // Fisher-Yates over the players, so each grid slot is filled by a marble
+    // drawn from the whole field rather than in the order the names arrived.
+    const order = players.map((_, i) => i);
+    const rng = new Rng(`${this.geometry.plan.seed}:grid`);
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = rng.int(0, i);
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+
     let index = 0;
     rows.forEach((offsets, row) => {
       const frame = this.geometry.frameAt(this.geometry.plan.startIndex - row * rowGap);
@@ -169,7 +190,7 @@ export class Race {
 
         const marble = new Marble(
           this.scene,
-          players[index],
+          players[order[index]],
           position,
           this.theme.marble,
           this.visuals,
