@@ -216,21 +216,36 @@ function createWedge(name: string, width: number, length: number, height: number
 }
 
 /**
- * Lateral offsets for one row of a pattern, evenly spaced and centred.
+ * Lateral offsets for one row of a pin field, as a staggered lattice.
  *
- * `shift` moves the row sideways by that fraction of the pin spacing, which is
- * how the grid gets staggered: without it, every row sits directly behind the
- * one in front and a marble that threads the first row sails through all of
- * them untouched.
+ * Pins sit on a fixed pitch and every other row is offset by half of it, so a
+ * gap in one row is covered by a pin in the next and there is no straight line
+ * through the field. Positions come back ordered from the centre outwards, so
+ * a caller wanting fewer than fit takes the innermost ones.
+ *
+ * The pitch has to be constant for this to work at all. An earlier version
+ * spread each row evenly across the channel instead, which meant the spacing
+ * changed with the number of pins in the row — so rows could not interlock
+ * however far they were shifted, and the field ended up with clear channels
+ * running down it that marbles simply flowed through. It also shifted whole
+ * rows sideways rather than staggering them about the centre, which pushed the
+ * outermost pin of every other row towards the wall.
  */
-function rowOffsets(count: number, usableHalfWidth: number, shift = 0): number[] {
-  if (count <= 0) return [];
-  if (count === 1) return [usableHalfWidth * shift];
-  const spacing = (usableHalfWidth * 2) / (count - 1);
-  return Array.from(
-    { length: count },
-    (_, i) => -usableHalfWidth + i * spacing + spacing * shift,
-  );
+function latticeOffsets(usableHalfWidth: number, pitch: number, staggered: boolean): number[] {
+  const offsets: number[] = [];
+  if (usableHalfWidth < 0 || pitch <= 0) return offsets;
+
+  if (staggered) {
+    // Straddling the centreline: ±pitch/2, ±3·pitch/2, ...
+    for (let k = 0; (k + 0.5) * pitch <= usableHalfWidth; k++) {
+      offsets.push((k + 0.5) * pitch, -(k + 0.5) * pitch);
+    }
+  } else {
+    // Centred on the centreline: 0, ±pitch, ±2·pitch, ...
+    offsets.push(0);
+    for (let k = 1; k * pitch <= usableHalfWidth; k++) offsets.push(k * pitch, -k * pitch);
+  }
+  return offsets;
 }
 
 export function buildObstacles(
@@ -295,36 +310,34 @@ export function buildObstacles(
 
     switch (spec.kind) {
       case "pins": {
-        // A regular field of pins: either a bowling triangle or a square grid.
+        // A regular field of pins: either a bowling triangle or a full grid.
         const isTriangle = p.pattern < 0.5;
         const diameter = 0.75;
         const height = 2.4;
         const rows = Math.round(p.rows);
         const rowGap = 3.2;
+        // Constant across every row, which is what lets the rows interlock.
+        const pitch = diameter + MIN_PIN_GAP;
 
         const parts: Mesh[] = [];
         for (let r = 0; r < rows; r++) {
           const rowFrame = track(spec.index - ((rows - 1) * rowGap) / 2 + r * rowGap);
-          // Bowling: one pin in the front row, growing by one each row back.
-          // Grid: the same count in every row.
-          const wanted = isTriangle ? r + 1 : Math.round(p.columns);
-          // Every other row steps across by half a space. A triangle staggers
-          // by construction; a grid has to be told to.
-          const shift = isTriangle ? 0 : (r % 2) * 0.5;
+          // Half the rows are offset by half a pitch. A bowling triangle gets
+          // this for free — row r holds r+1 pins, so odd rows hold an even
+          // number and straddle the centreline — and a grid is told to.
+          const staggered = r % 2 === 1;
 
-          // How many pins fit while leaving a marble-width gap between every
-          // pair *and* between the outermost pins and the walls. Counting only
-          // the gaps between pins is the trap: it packs the outer pins hard
-          // against the walls, and a marble wedges in the slot that leaves.
-          const span = rowFrame.width * 2;
-          const maxCount = Math.max(
-            1,
-            Math.floor((span - MIN_PIN_GAP) / (diameter + MIN_PIN_GAP)),
-          );
-          const count = Math.min(wanted, maxCount);
+          // Keep a marble-width gap between every pair of pins *and* between
+          // the outermost pins and the walls. Counting only the gaps between
+          // pins is the trap: it packs the outer pins hard against the walls,
+          // and a marble wedges in the slot that leaves.
           const usable = Math.max(0, rowFrame.width - MIN_PIN_GAP - diameter * 0.5);
+          const lattice = latticeOffsets(usable, pitch, staggered);
+          // Bowling: one pin in the front row, growing by one each row back.
+          // Grid: as many as the channel holds.
+          const chosen = isTriangle ? lattice.slice(0, r + 1) : lattice;
 
-          for (const lateral of rowOffsets(count, usable, shift)) {
+          for (const lateral of chosen) {
             const pin = CreateCylinder(
               "pin",
               { diameterTop: diameter * 0.72, diameterBottom: diameter, height, tessellation: 10 },

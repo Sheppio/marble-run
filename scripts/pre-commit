@@ -1,0 +1,27 @@
+#!/bin/sh
+#
+# Refuses a commit whose version has not moved.
+#
+# The rule is that every commit changes the version: minor for a functional
+# change, patch for a fix or a subtle adjustment. A hook cannot make that
+# judgement, so it only checks that a choice was made — `npm run bump minor`
+# or `npm run bump patch` makes it.
+#
+# Install with: npm run hooks:install
+
+staged_version=$(git show :package.json 2>/dev/null | sed -n 's/.*"version": "\([^"]*\)".*/\1/p')
+head_version=$(git show HEAD:package.json 2>/dev/null | sed -n 's/.*"version": "\([^"]*\)".*/\1/p')
+
+# No HEAD yet means the very first commit, which has nothing to compare to.
+[ -z "$head_version" ] && exit 0
+
+if [ "$staged_version" = "$head_version" ]; then
+  echo "pre-commit: version is still $head_version" >&2
+  echo "" >&2
+  echo "  Every commit moves the version. Pick one and stage package.json:" >&2
+  echo "    npm run bump minor   # functional change" >&2
+  echo "    npm run bump patch   # fix or subtle adjustment" >&2
+  exit 1
+fi
+
+exit 0

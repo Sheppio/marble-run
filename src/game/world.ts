@@ -667,7 +667,6 @@ export class World {
         this.camera.update(this.race, dt);
       }
 
-      this.race.updateVisuals(dt);
       this.animateGate(dt);
       this.lighting?.followShadows(this.camera.camera.getTarget());
       onFrame?.(dt);

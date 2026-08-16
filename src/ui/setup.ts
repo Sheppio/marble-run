@@ -50,6 +50,9 @@ export class SetupScreen {
     this.seed = normaliseSeed(initial.seed ?? dailySeed());
     this.themeId = loadThemeId() ?? DEFAULT_THEME_ID;
     this.root = el("div", { class: "screen setup-screen" });
+    // Which build this is. Small and out of the way in the corner, but present
+    // on the first screen, so a bug report can say what it was seen on.
+    this.root.append(el("span", { class: "version-tag", text: `v${__APP_VERSION__}` }));
     this.build();
   }
 

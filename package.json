@@ -1,7 +1,7 @@
 {
   "name": "marble-run",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.4.0",
   "type": "module",
   "description": "Seeded 3D marble run racing, built on Babylon.js and Havok physics.",
   "scripts": {
@@ -19,7 +19,9 @@
     "tune:speed": "node scripts/speed-source.mjs",
     "tune:baffles": "node scripts/baffle-sweep.mjs",
     "tune:camera": "node scripts/camera-motion.mjs",
-    "palette": "node scripts/palette-check.mjs"
+    "palette": "node scripts/palette-check.mjs",
+    "bump": "node scripts/bump-version.mjs",
+    "hooks:install": "git config core.hooksPath scripts && chmod +x scripts/pre-commit"
   },
   "dependencies": {
     "@babylonjs/core": "^7.54.3",

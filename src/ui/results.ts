@@ -46,8 +46,15 @@ export class ResultsScreen {
       { class: "podium" },
       podiumOrder.map((standing) => {
         const marble = standing.marble;
-        const ball = el("span", { class: "podium-ball" });
+        // Wears the pattern too. Without it a plain yellow marble and a
+        // banded yellow one are the same disc up here, which is exactly the
+        // pair the patterns exist to separate — and the list directly below
+        // shows them correctly, so the podium contradicted it.
+        const ball = el("span", {
+          class: `podium-ball row-swatch swatch-p${marble.player.pattern}`,
+        });
         ball.style.background = marble.player.color;
+        ball.style.setProperty("--swatch-accent", accentFor(marble.player.color));
         ball.style.boxShadow = `0 0 24px ${marble.player.color}66`;
         return el("div", { class: `podium-slot place-${standing.place}` }, [
           ball,

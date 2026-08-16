@@ -92,11 +92,8 @@ export class Marble {
   departureWall = 0;
   /** True for the single step during which a teleport is being applied. */
   teleporting = false;
-  /** Simulated time at which a finished marble should leave the track. */
-  retireAt: number | null = null;
   /** True once the physics body has been removed after finishing. */
   retired = false;
-  private retireProgress = 0;
 
   constructor(
     scene: Scene,
@@ -190,23 +187,17 @@ export class Marble {
   /**
    * Takes a finished marble out of the simulation.
    *
-   * Finishers used to pile up in the catch basin and back up over the line,
-   * blocking marbles still racing. Retiring them removes the traffic jam and
-   * saves the physics work of simulating marbles whose race is over.
+   * Kept for the fast-forward path and for safety, but no longer used in a
+   * normal race. Finishers used to be lifted off a couple of seconds after
+   * crossing the line, back when nothing closed the end of the catch basin and
+   * they would otherwise have rolled off it. Now the basin has a wall, they
+   * simply coast to a stop against it and stay there, which is what a marble
+   * run actually does and lets you see the finishing order pile up.
    */
   retire(): void {
     if (this.retired) return;
     this.retired = true;
     this.aggregate.dispose();
-  }
-
-  /** Shrinks a retired marble away. Visual only, so it runs on frame time. */
-  updateVisual(dt: number): void {
-    if (!this.retired || this.retireProgress >= 1) return;
-    this.retireProgress = Math.min(1, this.retireProgress + dt * 2.2);
-    const scale = 1 - this.retireProgress;
-    this.mesh.scaling.setAll(Math.max(0.001, scale));
-    if (this.retireProgress >= 1) this.mesh.setEnabled(false);
   }
 
   dispose(): void {

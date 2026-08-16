@@ -150,6 +150,19 @@ body {
 
 /* ------------------------------------------------------------------ setup */
 
+.version-tag {
+  position: absolute;
+  top: calc(var(--safe-top) + 0.55rem);
+  left: calc(var(--safe-left) + 0.7rem);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  opacity: 0.65;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
 .setup-screen {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -633,9 +646,12 @@ body {
   gap: 0.3rem;
 }
 
+/* Also carries .row-swatch, which supplies the pattern overlay. The size and
+   border here win because this rule comes later in the sheet. */
 .podium-ball {
   width: 34px;
   height: 34px;
+  min-width: 34px;
   border-radius: 50%;
   border: 2px solid rgba(255, 255, 255, 0.4);
 }

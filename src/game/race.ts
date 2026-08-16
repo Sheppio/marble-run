@@ -63,8 +63,6 @@ const NO_PROGRESS_RESCUE_AFTER = 11.0;
 const PROGRESS_EPSILON = 4;
 /** Once the leader finishes, stragglers get this long before being timed out. */
 const STRAGGLER_GRACE = 25;
-/** How long a finisher keeps rolling before it is lifted off the track. */
-const RETIRE_DELAY = 2.2;
 /**
  * Hard ceiling on a race. Nothing should ever reach this, but a race that
  * cannot end is worse than one that ends untidily, so there is always a floor
@@ -199,8 +197,11 @@ export class Race {
     }
 
     for (const marble of this.marbles) {
-      if (marble.finished) continue;
-      this.applyZones(marble);
+      // Finishers keep their rolling resistance so they coast to a stop in the
+      // basin instead of rattling against the end wall for the rest of the
+      // race. They are excused the force zones, which are there to shape the
+      // racing and have no business acting on a marble whose race is over.
+      if (!marble.finished) this.applyZones(marble);
       this.applyResistance(marble);
     }
   }
@@ -214,10 +215,7 @@ export class Race {
 
     for (const marble of this.marbles) {
       marble.settleTeleport();
-      if (marble.finished) {
-        if (marble.retireAt !== null && this.simTime >= marble.retireAt) marble.retire();
-        continue;
-      }
+      if (marble.finished) continue;
       this.updateProgress(marble);
       if (this.probeMode) continue;
       this.checkRecovery(marble);
@@ -411,7 +409,6 @@ export class Race {
     if (marble.progressIndex < this.geometry.plan.finishIndex) return;
     marble.finished = true;
     marble.finishTime = this.simTime;
-    marble.retireAt = this.simTime + RETIRE_DELAY;
     marble.place = ++this.finishedCount;
     if (this.firstFinishTime === null) this.firstFinishTime = this.simTime;
     this.events.onFinish?.(marble, marble.place);
@@ -461,11 +458,6 @@ export class Race {
   /** Ends the race immediately, ranking whoever is still out on track. */
   forceComplete(): void {
     this.complete();
-  }
-
-  /** Frame-time visual updates that must not run on the physics clock. */
-  updateVisuals(dt: number): void {
-    for (const marble of this.marbles) marble.updateVisual(dt);
   }
 
   dispose(): void {
