@@ -93,6 +93,7 @@ export function createTrackMaterial(
   name: string,
   options: SurfaceOptions,
   detail: DetailMaps | null,
+  relief = true,
 ): PBRMaterial {
   // Emission is dropped here even when a theme asks for it. The whole run is
   // one mesh with one material and its palette lives in vertex colours, but
@@ -103,7 +104,7 @@ export function createTrackMaterial(
   // and picks out the lit wall vertices on its own.
   const { glow: _ignored, ...rest } = options;
   const material = createSurface(scene, name, Color3.White(), rest);
-  applyDetail(material, detail);
+  applyDetail(material, detail, relief);
   return material;
 }
 
@@ -114,10 +115,14 @@ export function createTrackMaterial(
  * already has, so one set of maps works for every theme and every palette the
  * seed produces — the wood grain tints itself to the timber it is sitting on.
  */
-export function applyDetail(material: PBRMaterial, detail: DetailMaps | null): void {
+export function applyDetail(
+  material: PBRMaterial,
+  detail: DetailMaps | null,
+  relief = true,
+): void {
   if (!detail) return;
   material.albedoTexture = detail.albedo as unknown as BaseTexture;
-  material.bumpTexture = detail.normal as unknown as BaseTexture;
+  if (relief) material.bumpTexture = detail.normal as unknown as BaseTexture;
   // Babylon reads normal maps in OpenGL convention; these are baked with Y
   // pointing down the texture, which is the opposite.
   material.invertNormalMapY = true;

@@ -21,6 +21,12 @@ export interface QualitySettings {
    */
   hardwareScaling: number;
   shadows: boolean;
+  /**
+   * Normal-mapped surface relief. Colour detail is kept at every tier — it is
+   * a single extra texture fetch — but relief adds per-pixel work over the
+   * whole frame, and the ground plane alone covers most of it.
+   */
+  relief: boolean;
   shadowMapSize: number;
   antialias: boolean;
   glow: boolean;
@@ -44,6 +50,7 @@ export function detectQuality(): QualitySettings {
       // weak GPU.
       hardwareScaling: 1,
       shadows: false,
+      relief: false,
       shadowMapSize: 512,
       antialias: true,
       glow: false,
@@ -58,6 +65,7 @@ export function detectQuality(): QualitySettings {
       // pixels nobody can distinguish, at real cost to the frame budget.
       hardwareScaling: 1 / Math.min(dpr, 1.5),
       shadows: true,
+      relief: true,
       shadowMapSize: 1024,
       antialias: true,
       glow: false,
@@ -69,6 +77,7 @@ export function detectQuality(): QualitySettings {
     tier: "high",
     hardwareScaling: 1 / Math.min(dpr, 2),
     shadows: true,
+    relief: true,
     shadowMapSize: 2048,
     antialias: true,
     glow: true,

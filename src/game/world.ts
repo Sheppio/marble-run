@@ -168,6 +168,7 @@ export class World {
       theme.track(paletteSeed),
       theme.trackSurface,
       trackDetail,
+      this.quality.relief,
     );
     this.obstacles = buildObstacles(
       this.scene,
@@ -175,6 +176,7 @@ export class World {
       options.disableObstacles ? [] : this.plan.obstacles,
       theme,
       trackDetail,
+      this.quality.relief,
     );
 
     if (!this.headless) {
@@ -348,7 +350,7 @@ export class World {
       roughness: 0.8,
       environmentIntensity: 0.25,
     });
-    applyDetail(pillarMaterial, this.trackDetail);
+    applyDetail(pillarMaterial, this.trackDetail, this.quality.relief);
     pillar.material = pillarMaterial;
     pillar.isPickable = false;
 
@@ -441,7 +443,7 @@ export class World {
     });
     const grass = grassDetail(this.scene);
     this.textures.push(grass);
-    applyDetail(floorMaterial, grass);
+    applyDetail(floorMaterial, grass, this.quality.relief);
     // The plane is 1600cm across; without a heavy tile the grass is a single
     // smear. This puts a tile roughly every 25cm, about a hand's width.
     grass.albedo.uScale = 64;

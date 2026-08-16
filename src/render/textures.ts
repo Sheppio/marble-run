@@ -149,8 +149,10 @@ function raw(scene: Scene, name: string, data: Uint8Array, size: number): RawTex
   texture.name = name;
   texture.wrapU = Texture.WRAP_ADDRESSMODE;
   texture.wrapV = Texture.WRAP_ADDRESSMODE;
-  // Cheap and very visible at the grazing angles the broadcast camera uses.
-  texture.anisotropicFilteringLevel = 8;
+  // Visible at the grazing angles the broadcast camera uses. Held at 4 rather
+  // than the usual 8 because the ground plane is enormous and tiled 64 times
+  // across, so every extra sample there is paid over most of the screen.
+  texture.anisotropicFilteringLevel = 4;
   return texture;
 }
 

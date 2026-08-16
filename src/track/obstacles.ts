@@ -147,6 +147,7 @@ export function buildObstacles(
   specs: ObstacleSpec[],
   theme: Theme,
   detail: DetailMaps | null = null,
+  relief = true,
 ): ObstacleSet {
   const statics: PhysicsAggregate[] = [];
   const shadowCasters: Mesh[] = [];
@@ -172,8 +173,8 @@ export function buildObstacles(
   // The structural obstacles are made of the same stuff as the run itself, so
   // they wear the same grain. Without it a wedge reads as a plastic prop
   // dropped onto a wooden track. Pins and posts stay smooth — they are metal.
-  applyDetail(materials.timber, detail);
-  applyDetail(materials.rubber, detail);
+  applyDetail(materials.timber, detail, relief);
+  applyDetail(materials.rubber, detail, relief);
 
   const track = (index: number) => geometry.frameAt(index);
 

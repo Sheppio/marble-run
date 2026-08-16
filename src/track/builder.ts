@@ -78,6 +78,7 @@ export function buildTrackMesh(
   palette: TimberPalette,
   surface: SurfaceOptions,
   detail: DetailMaps | null,
+  relief: boolean,
 ): TrackMeshes {
   const { frames } = geometry;
   const { shellThickness } = TRACK_CONSTANTS;
@@ -217,7 +218,7 @@ export function buildTrackMesh(
     vertexData.applyToMesh(shell, false);
   }
 
-  const material = createTrackMaterial(scene, "track-mat", surface, detail);
+  const material = createTrackMaterial(scene, "track-mat", surface, detail, relief);
   material.backFaceCulling = true;
   shell.material = material;
   shell.useVertexColors = true;
