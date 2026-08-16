@@ -216,7 +216,8 @@ function createWedge(name: string, width: number, length: number, height: number
 }
 
 /**
- * Lateral offsets for one row of a pin field, as a staggered lattice.
+ * Lateral offsets for one row of a staggered lattice — a pin field, or the
+ * marbles on the start grid.
  *
  * Pins sit on a fixed pitch and every other row is offset by half of it, so a
  * gap in one row is covered by a pin in the next and there is no straight line
@@ -231,7 +232,11 @@ function createWedge(name: string, width: number, length: number, height: number
  * rows sideways rather than staggering them about the centre, which pushed the
  * outermost pin of every other row towards the wall.
  */
-function latticeOffsets(usableHalfWidth: number, pitch: number, staggered: boolean): number[] {
+export function latticeOffsets(
+  usableHalfWidth: number,
+  pitch: number,
+  staggered: boolean,
+): number[] {
   const offsets: number[] = [];
   if (usableHalfWidth < 0 || pitch <= 0) return offsets;
 

@@ -910,7 +910,11 @@ export function generateTrack(seedText: string): TrackPlan {
     finalDistances.push(finalDistances[i - 1] + Vector3.Distance(points[i - 1], points[i]));
   }
 
-  const startIndex = Math.min(4, points.length - 1);
+  // Far enough in to leave a starting shelf behind the line. A full field of
+  // eighteen stands eight rows deep, and with only four points of run-in the
+  // back rows were clamped to the top of the track and spawned on top of each
+  // other.
+  const startIndex = Math.min(18, points.length - 1);
   // Map the finish marker from raw-walk space into resampled space. Both are
   // parameterised by arc length, so the fraction carries across directly.
   const finishIndex = Math.max(

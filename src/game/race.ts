@@ -1,7 +1,7 @@
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
 import type { TrackGeometry } from "../track/geometry";
-import type { ForceZone } from "../track/obstacles";
+import { latticeOffsets, type ForceZone } from "../track/obstacles";
 import { Marble, type Player } from "./marble";
 import { getTheme, type Theme } from "../render/theme";
 import {
@@ -130,33 +130,60 @@ export class Race {
     this.spawnMarbles(players);
   }
 
-  /** Lines the marbles up across the start shelf, in rows. */
+  /**
+   * Lines the marbles up across the start shelf, in staggered rows.
+   *
+   * Rows alternate between one centred on the channel axis and one straddling
+   * it, so the grid nests rather than forming columns — five across, then four
+   * in the gaps, then five again. Two reasons. It looks like a start line
+   * rather than a spreadsheet, and it fixes an overlap: rows sit closer
+   * together than a marble is wide, so aligned rows spawned slightly
+   * interpenetrating and shoved each other apart at the flag. Offset by half a
+   * space, the diagonal between neighbours is comfortably clear.
+   */
   private spawnMarbles(players: Player[]): void {
-    const perRow = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(players.length))));
     const startFrame = this.geometry.frameAt(this.geometry.plan.startIndex);
-    const spacing = TRACK_CONSTANTS.marbleRadius * 2.5;
+    const pitch = TRACK_CONSTANTS.marbleRadius * 2.5;
+    // Keep the outermost marble a clear radius off the wall.
+    const usable = Math.max(0, startFrame.width - TRACK_CONSTANTS.marbleRadius * 2);
+    const rowGap = 1.6;
 
-    players.forEach((player, i) => {
-      const row = Math.floor(i / perRow);
-      const col = i % perRow;
-      const rowCount = Math.min(perRow, players.length - row * perRow);
-      const lateral = (col - (rowCount - 1) / 2) * spacing;
+    // Deal the field into rows, widest first, taking each row from the centre
+    // outwards so a part-filled back row stays centred.
+    const rows: number[][] = [];
+    for (let placed = 0, r = 0; placed < players.length; r++) {
+      const lattice = latticeOffsets(usable, pitch, r % 2 === 1);
+      if (lattice.length === 0) lattice.push(0);
+      const row = lattice.slice(0, players.length - placed);
+      rows.push(row);
+      placed += row.length;
+    }
 
-      const frame = this.geometry.frameAt(this.geometry.plan.startIndex - row * 1.3);
-      const position = frame.position
-        .add(frame.right.scale(lateral))
-        .add(frame.up.scale(TRACK_CONSTANTS.marbleRadius * 1.4));
+    let index = 0;
+    rows.forEach((offsets, row) => {
+      const frame = this.geometry.frameAt(this.geometry.plan.startIndex - row * rowGap);
+      for (const lateral of offsets) {
+        const position = frame.position
+          .add(frame.right.scale(lateral))
+          .add(frame.up.scale(TRACK_CONSTANTS.marbleRadius * 1.4));
 
-      const marble = new Marble(this.scene, player, position, this.theme.marble, this.visuals);
-      marble.freeze();
-      marble.progressIndex = this.geometry.plan.startIndex;
-      marble.distance = this.geometry.distanceAtIndex(marble.progressIndex);
-      marble.bestDistance = marble.distance;
-      marble.progressWatermark = marble.distance;
-      this.marbles.push(marble);
+        const marble = new Marble(
+          this.scene,
+          players[index],
+          position,
+          this.theme.marble,
+          this.visuals,
+        );
+        marble.freeze();
+        marble.progressIndex = this.geometry.plan.startIndex;
+        marble.distance = this.geometry.distanceAtIndex(marble.progressIndex);
+        marble.bestDistance = marble.distance;
+        marble.progressWatermark = marble.distance;
+        this.marbles.push(marble);
+        index++;
+      }
     });
 
-    void startFrame;
   }
 
   beginCountdown(seconds = 3): void {
