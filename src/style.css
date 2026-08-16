@@ -399,7 +399,12 @@ body {
   grid-auto-flow: column;
   grid-template-rows: repeat(var(--board-rows, 6), auto);
   gap: 0.22rem;
-  margin-top: 0.5rem;
+  /* Pushed to the bottom, just above the controls. The camera keeps the
+     marbles around the middle of the frame and the track ahead of them in the
+     upper half, so the top of the screen is the worst place to put an overlay
+     and the bottom is close to free. */
+  margin-top: auto;
+  margin-bottom: 0.45rem;
   align-self: flex-end;
   justify-self: end;
   /* Deliberately narrow: this sits on top of the race, and the race is the
@@ -510,7 +515,6 @@ body {
 }
 
 .hud-controls {
-  margin-top: auto;
   display: flex;
   gap: 0.5rem;
   justify-content: flex-end;
