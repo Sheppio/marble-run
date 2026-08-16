@@ -24,7 +24,10 @@ const readArg = (name, fallback) => {
 
 const SEEDS = Number(readArg("seeds", 60));
 const PLAYERS = Number(readArg("players", 6));
-const ANGLES = readArg("angles", "0.10,0.18,0.24,0.30").split(",").map(Number);
+const KNOB = readArg("knob", "baffleLean");
+const VALUES = readArg("values", KNOB === "baffleReach" ? "0.55,0.7,0.85,1.05" : "0.10,0.18,0.24,0.30")
+  .split(",")
+  .map(Number);
 
 const MIME = {
   ".html": "text/html",
@@ -54,18 +57,18 @@ const browser = await chromium.launch({
 });
 
 try {
-  console.log(`\n=== baffle sweep · ${SEEDS} seeds × ${PLAYERS} marbles per angle ===\n`);
-  console.log("  angle    finish   all home   rescues   baffle-stalls   median win");
+  console.log(`\n=== ${KNOB} sweep · ${SEEDS} seeds × ${PLAYERS} marbles per value ===\n`);
+  console.log("  value    finish   all home   rescues   baffle-stalls   median win");
   console.log("  " + "-".repeat(66));
 
-  for (const angle of ANGLES) {
+  for (const angle of VALUES) {
     const page = await browser.newPage();
     page.on("pageerror", (e) => console.error("page error:", String(e)));
     // Set before the bundle runs, so the override is in place by the time the
     // first track is built.
-    await page.addInitScript((a) => {
-      window.__tuning = { baffleLean: a };
-    }, angle);
+    await page.addInitScript(([knob, a]) => {
+      window.__tuning = { [knob]: a };
+    }, [KNOB, angle]);
     await page.goto("http://127.0.0.1:4324/diagnostic.html", { waitUntil: "load" });
     await page.waitForFunction(() => typeof window.runDiagnostic === "function", {
       timeout: 30000,
@@ -84,9 +87,12 @@ try {
       for (const near of r.strandedNear ?? []) if (near === "baffles") baffleTrouble++;
     }
 
-    const deg = ((angle * 180) / Math.PI).toFixed(1);
+    const label =
+      KNOB === "baffleLean"
+        ? `${angle.toFixed(2)} (${((angle * 180) / Math.PI).toFixed(1)}°)`
+        : angle.toFixed(2);
     console.log(
-      `  ${angle.toFixed(2)} (${deg}°)`.padEnd(13) +
+      `  ${label}`.padEnd(13) +
         `${(summary.finishRate * 100).toFixed(1)}%`.padEnd(9) +
         `${(summary.racesWhereEveryoneFinished * 100).toFixed(1)}%`.padEnd(11) +
         `${summary.meanRescuesPerRace.toFixed(1)}`.padEnd(10) +

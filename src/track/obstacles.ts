@@ -66,9 +66,18 @@ const MIN_PIN_GAP = TRACK_CONSTANTS.marbleRadius * 3.4;
  * which is before any page script gets to set one.
  */
 function baffleLean(): number {
+  return tuning("baffleLean", BAFFLE_LEAN);
+}
+
+/** How far a baffle reaches across the channel, as a multiple of half-width. */
+function baffleReach(): number {
+  return tuning("baffleReach", BAFFLE_REACH);
+}
+
+function tuning(name: string, fallback: number): number {
   const overrides = (globalThis as { __tuning?: Record<string, number> }).__tuning;
-  const value = overrides?.baffleLean;
-  return typeof value === "number" ? value : BAFFLE_LEAN;
+  const value = overrides?.[name];
+  return typeof value === "number" ? value : fallback;
 }
 
 /**
@@ -98,6 +107,31 @@ function baffleLean(): number {
  * angle — see the reach comment below.
  */
 const BAFFLE_LEAN = 0.3;
+
+/**
+ * How far a baffle reaches across the channel, as a multiple of the channel's
+ * half-width — so 0.7 blocks about a third of the full channel and 1.05
+ * blocks slightly more than half.
+ *
+ * This, not the angle, is the control on how much trouble baffles cause, and
+ * it is close to linear. `npm run tune:baffles -- --knob baffleReach`, 60
+ * seeds each:
+ *
+ *   0.55   97.2% finish   86.7% all home   1.5 rescues    51 baffle stalls
+ *   0.70   94.7%          76.7%            2.2            92
+ *   0.85   92.2%          70.0%            3.5           156
+ *   1.05   91.1%          71.7%            4.5           182
+ *
+ * 1.05 reached past the centreline and made the field funnel through a single
+ * gap, which bunches marbles up beautifully and is also what had one in four
+ * races needing a marble helped off a baffle. 0.7 halves the stalls and still
+ * blocks a third of the channel, which is enough to shuffle the order.
+ *
+ * The bunching is genuinely good to watch, so this is a taste call as much as
+ * a measurement: the numbers say where each setting lands, not which one is
+ * right.
+ */
+const BAFFLE_REACH = 0.7;
 
 /** Rotation carrying local axes onto the track frame at `frame`. */
 export function frameRotation(frame: TrackFrame): Quaternion {
@@ -316,6 +350,7 @@ export function buildObstacles(
         const height = 1.6;
 
         const lean = baffleLean();
+        const reachFactor = baffleReach();
         const parts: Mesh[] = [];
         for (let i = 0; i < count; i++) {
           const f = track(spec.index - ((count - 1) * spacing) / 2 + i * spacing);
@@ -327,7 +362,7 @@ export function buildObstacles(
           // creates the most drama and also the most trouble — it is kept to
           // straights, where the banking is not already pressing marbles into
           // the wall it grows from.
-          const reach = Math.max(1.0, Math.min(f.width * 1.05, f.width * 2 - MIN_CLEAR_LANE));
+          const reach = Math.max(1.0, Math.min(f.width * reachFactor, f.width * 2 - MIN_CLEAR_LANE));
           const baffle = CreateBox(
             "baffle",
             { width: reach, height, depth: thickness },
