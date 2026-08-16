@@ -247,6 +247,14 @@ function step(value: number, edge: number): number {
 }
 
 /**
+ * How far a plain marble's tonal swirl shifts towards its accent, 0-1.
+ *
+ * Enough to read the spin at broadcast distance, little enough that the marble
+ * still says one colour at a glance.
+ */
+const TONE_DEPTH = 0.26;
+
+/**
  * How many marble finishes exist: plain glass, then two patterned variants.
  * See `marbleTexture`.
  */
@@ -323,12 +331,29 @@ export function marbleTexture(
           break;
       }
 
+      // A broad tonal swirl under everything, in the marble's own colour
+      // rather than its accent — a shade of red on red, not white on red.
+      //
+      // This is what makes a plain marble's roll readable. A uniform sphere
+      // looks motionless however fast it is actually turning, and the solid
+      // colours are most of the field, so without this most of the race has no
+      // visible spin at all. It has to stay tonal: pushed up into real contrast
+      // it reads as a third pattern and undoes the distinction between the
+      // plain marbles and the marked ones.
+      const swirl = Math.abs(Math.sin(u * Math.PI * 2 + phase * 0.7 + v * 1.6));
+      const tone = smoothstep(Math.max(0, Math.min(1, (swirl - 0.2) / 0.55))) * TONE_DEPTH;
+
+      // Blending towards the accent gets the direction right for free: pale
+      // marbles darken, dark ones lighten, so the black and white ones are not
+      // left as the two that still look static.
+      const shade = mark + (1 - mark) * tone;
+
       // A little mottle everywhere, so the glass has depth rather than reading
       // as painted plastic.
       const cloud = fbm(u, v, 6, 3) * 0.16 + 0.92;
-      const r = (base.r * (1 - mark) + accent.r * mark) * cloud;
-      const g = (base.g * (1 - mark) + accent.g * mark) * cloud;
-      const b = (base.b * (1 - mark) + accent.b * mark) * cloud;
+      const r = (base.r * (1 - shade) + accent.r * shade) * cloud;
+      const g = (base.g * (1 - shade) + accent.g * shade) * cloud;
+      const b = (base.b * (1 - shade) + accent.b * shade) * cloud;
 
       const i = (y * size + x) * 4;
       data[i] = Math.round(Math.max(0, Math.min(1, r)) * 255);

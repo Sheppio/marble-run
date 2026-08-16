@@ -46,7 +46,13 @@ export function saveThemeId(id: string): void {
   }
 }
 
-export const MAX_PLAYERS = 12;
+/**
+ * Nine solid colours, then those same nine again wearing one of the two
+ * patterned finishes — so eighteen is exactly what the palette can carry with
+ * every marble a distinct colour-and-finish pair. Past that the pairs would
+ * start repeating.
+ */
+export const MAX_PLAYERS = 18;
 export const MIN_PLAYERS = 2;
 
 
