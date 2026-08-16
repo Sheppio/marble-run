@@ -365,8 +365,8 @@ body {
 .hud-top {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  gap: 0.6rem;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .hud-seed {
@@ -417,7 +417,6 @@ body {
      upper half, so the top of the screen is the worst place to put an overlay
      and the bottom is close to free. */
   margin-top: auto;
-  margin-bottom: 0.45rem;
   /* Full width. It sits at the bottom over ground the camera has already
      passed, so width costs nothing there, and spreading the rows out means
      long names fit and the gap figures stop being cramped against them. */
@@ -528,17 +527,11 @@ body {
   background: radial-gradient(circle at 50% 50%, var(--swatch-accent, #fff) 32%, transparent 34%);
 }
 
-.hud-controls {
-  display: flex;
-  gap: 0.5rem;
-  justify-content: flex-end;
-  pointer-events: auto;
-}
-
 .btn-hud {
   pointer-events: auto;
-  font-size: 0.8rem;
-  padding: 0.5rem 0.85rem;
+  font-size: 0.72rem;
+  padding: 0.36rem 0.7rem;
+  white-space: nowrap;
   background: rgba(7, 10, 20, 0.6);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);

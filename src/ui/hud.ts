@@ -48,14 +48,6 @@ export class Hud {
   private build(seed: string): void {
     this.clockNode = el("span", { class: "clock", text: "0.00" });
 
-    const topBar = el("div", { class: "hud-top" }, [
-      el("div", { class: "hud-seed" }, [
-        el("span", { class: "hud-seed-label", text: "Seed" }),
-        el("span", { class: "hud-seed-value", text: seed }),
-      ]),
-      this.clockNode,
-    ]);
-
     this.boardNode = el("div", { class: "leaderboard" });
 
     this.cameraButton = el("button", {
@@ -67,14 +59,22 @@ export class Hud {
       this.cameraButton.textContent = this.callbacks.onCycleCamera();
     });
 
+    // Seed, camera, clock across the top. The camera button used to sit at the
+    // bottom, which held the scoreboard a button's height clear of the edge for
+    // no reason — up here it costs nothing, since the top bar was already
+    // there, and the board drops to the very bottom of the screen.
+    const topBar = el("div", { class: "hud-top" }, [
+      el("div", { class: "hud-seed" }, [
+        el("span", { class: "hud-seed-label", text: "Seed" }),
+        el("span", { class: "hud-seed-value", text: seed }),
+      ]),
+      this.cameraButton,
+      this.clockNode,
+    ]);
+
     this.countdownNode = el("div", { class: "countdown" });
 
-    this.root.append(
-      topBar,
-      this.boardNode,
-      el("div", { class: "hud-controls" }, [this.cameraButton]),
-      this.countdownNode,
-    );
+    this.root.append(topBar, this.boardNode, this.countdownNode);
   }
 
   showCountdown(value: number): void {
