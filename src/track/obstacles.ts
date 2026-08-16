@@ -74,6 +74,11 @@ function baffleReach(): number {
   return tuning("baffleReach", BAFFLE_REACH);
 }
 
+/** Contact friction on a baffle face. See `BAFFLE_FRICTION`. */
+function baffleFriction(): number {
+  return tuning("baffleFriction", BAFFLE_FRICTION);
+}
+
 function tuning(name: string, fallback: number): number {
   const overrides = (globalThis as { __tuning?: Record<string, number> }).__tuning;
   const value = overrides?.[name];
@@ -132,6 +137,9 @@ const BAFFLE_LEAN = 0.3;
  * right.
  */
 const BAFFLE_REACH = 0.7;
+
+/** Contact friction between a marble and a baffle face. Measured below. */
+const BAFFLE_FRICTION = 0.35;
 
 /** Rotation carrying local axes onto the track frame at `frame`. */
 export function frameRotation(frame: TrackFrame): Quaternion {
@@ -381,7 +389,7 @@ export function buildObstacles(
             .add(f.up.scale(height / 2));
           parts.push(baffle);
         }
-        commit(parts, materials.rubber, { restitution: 0.25, friction: 0.35 });
+        commit(parts, materials.rubber, { restitution: 0.25, friction: baffleFriction() });
         break;
       }
 
