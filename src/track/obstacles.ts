@@ -86,32 +86,44 @@ function tuning(name: string, fallback: number): number {
 }
 
 /**
- * Shipped baffle sweep, in radians (about 14°).
+ * Shipped baffle sweep, in radians (about 31.5°).
  *
- * Swept, not square. The instinct is that a baffle angled hard across the
- * channel is what marbles jam against, and that relaxing it would let them
- * slide past — it is the opposite. `npm run tune:baffles` over 60 seeds each:
+ * This is the single most important number for whether marbles get stuck.
  *
- *   5.7°   75.6% finish   28.3% all home   927 baffle stalls
- *  10.3°   84.7%          38.3%            363
- *  13.8°   93.1%          68.3%            229
- *  17.2°   91.1%          71.7%            182
+ * A marble held against a baffle face is only driven along it, towards the tip
+ * and freedom, by the component of gravity that resolves onto the face:
  *
- * A face closer to square across the channel stops a marble dead instead of
- * guiding it along to the tip, and once one stops the rest of the field piles
- * into it. Below about 13° that failure runs away.
+ *   F = m . g . sin(track gradient) . sin(sweep)
  *
- * 13.8° looked like a free relaxation on finish rate alone, but it is not:
- * measured twice, it raises interventions consistently (4.5 -> 5.7 per race
- * over 60 seeds, 3.8 -> 4.9 over 100) and takes baffle-blamed stalls from 182
- * to 229. More marbles eventually get home, but more of them have to be
- * helped, and being helped is the thing that reads as a marble stuck on a
- * baffle. 17.2° is the best of the four on that measure, so it stays.
+ * Both terms are small and they multiply. The roll-away invariant pins the
+ * minimum gradient at 4.9°, so sin(gradient) can be as little as 0.085; at the
+ * old sweep of 17.2° that left about 2.5% of gravity driving the escape,
+ * against 1.8% rolling resistance holding it back. A margin that thin is why
+ * marbles stalled unpredictably rather than consistently.
  *
- * The lever for sticking is the baffle's reach across the channel, not its
- * angle — see the reach comment below.
+ * Widening the sweep is the direct fix, and it works about as well as the
+ * algebra says. `npm run tune:baffles`, 60 seeds each:
+ *
+ *    5.7°   75.6% finish   28.3% all home   927 baffle stalls
+ *   10.3°   84.7%          38.3%            363
+ *   13.8°   93.1%          68.3%            229
+ *   17.2°   94.7%          76.7%             92
+ *   24.1°   98.6%          91.7%             22
+ *   31.5°   99.2%          95.0%              8
+ *   40.1°   99.7%          98.3%             13
+ *
+ * An earlier pass measured only the first four and concluded 17.2° was the
+ * best available, which was true of what had been tried and quite wrong in
+ * general — the sweep had been searched downwards from the shipped value and
+ * never upwards.
+ *
+ * 31.5° over 40.1° is a judgement call rather than a measurement: the two are
+ * level on interventions and within noise of each other on stalls, and the
+ * shallower one keeps the baffle more across the flow, which is what makes it
+ * an obstacle rather than a guide rail. 40.1° is there if reliability ever
+ * matters more than the shuffling.
  */
-const BAFFLE_LEAN = 0.3;
+const BAFFLE_LEAN = 0.55;
 
 /**
  * How far a baffle reaches across the channel, as a multiple of the channel's
