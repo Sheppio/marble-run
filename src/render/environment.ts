@@ -26,6 +26,8 @@ export interface SkyPalette {
   horizon: Color3;
   ground: Color3;
   sun: Color3;
+  /** Cloud cover, 0–1. Omit for a clear sky. */
+  clouds?: number;
 }
 
 export const DEFAULT_SKY: SkyPalette = {
@@ -35,8 +37,58 @@ export const DEFAULT_SKY: SkyPalette = {
   sun: Color3.FromHexString("#fff2d0"),
 };
 
+/**
+ * Half-width of the shadow frustum, in cm.
+ *
+ * Wide enough to hold the run and its legs at the distance the broadcast camera
+ * sits, narrow enough to keep the shadow map dense.
+ */
+const SHADOW_EXTENT = 110;
+
 /** Direction the key light comes from. */
 const SUN_DIRECTION = new Vector3(-0.45, -1, 0.35).normalize();
+
+/** Tiling value noise on the unit sphere, used for cloud cover. */
+function cloudNoise(direction: Vector3, octaves: number): number {
+  let total = 0;
+  let amplitude = 1;
+  let sum = 0;
+  let frequency = 2.2;
+  for (let o = 0; o < octaves; o++) {
+    // Hashing the quantised direction gives a stable field over the sphere
+    // without needing a UV parameterisation, so there is no pinching at the
+    // poles the way a lat-long noise would give.
+    const x = direction.x * frequency;
+    const y = direction.y * frequency;
+    const z = direction.z * frequency;
+    const xi = Math.floor(x);
+    const yi = Math.floor(y);
+    const zi = Math.floor(z);
+    const fx = x - xi;
+    const fy = y - yi;
+    const fz = z - zi;
+    const ease = (t: number) => t * t * (3 - 2 * t);
+    const ex = ease(fx);
+    const ey = ease(fy);
+    const ez = ease(fz);
+
+    const at = (ax: number, ay: number, az: number) => {
+      const n = Math.sin(ax * 127.1 + ay * 311.7 + az * 74.7) * 43758.5453;
+      return n - Math.floor(n);
+    };
+    const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+    const c00 = lerp(at(xi, yi, zi), at(xi + 1, yi, zi), ex);
+    const c10 = lerp(at(xi, yi + 1, zi), at(xi + 1, yi + 1, zi), ex);
+    const c01 = lerp(at(xi, yi, zi + 1), at(xi + 1, yi, zi + 1), ex);
+    const c11 = lerp(at(xi, yi + 1, zi + 1), at(xi + 1, yi + 1, zi + 1), ex);
+    total += lerp(lerp(c00, c10, ey), lerp(c01, c11, ey), ez) * amplitude;
+
+    sum += amplitude;
+    amplitude *= 0.5;
+    frequency *= 2.1;
+  }
+  return total / sum;
+}
 
 function skyColor(direction: Vector3, palette: SkyPalette): Color3 {
   const y = direction.y;
@@ -48,6 +100,20 @@ function skyColor(direction: Vector3, palette: SkyPalette): Color3 {
   } else {
     const t = Math.pow(Math.min(1, -y), 0.6);
     color = Color3.Lerp(palette.horizon, palette.ground, t);
+  }
+
+  // Cloud cover. The sky is both the backdrop and the reflection source, so
+  // clouds do double duty: they stop the upper half of the frame being a flat
+  // gradient, and they put structure into the highlight rolling across every
+  // marble, which is most of what makes the glass read as glass.
+  if (palette.clouds && y > 0) {
+    const density = cloudNoise(direction, 4);
+    // Fade out towards the horizon, where clouds would be edge-on anyway, and
+    // sharpen the threshold so they read as distinct banks rather than haze.
+    const band = Math.min(1, y * 3.2);
+    const cover = Math.max(0, density - (1 - palette.clouds)) / Math.max(0.001, palette.clouds);
+    const amount = Math.pow(cover, 1.6) * band;
+    color = Color3.Lerp(color, new Color3(1, 1, 1), Math.min(0.92, amount));
   }
 
   // A soft sun disc and bloom around the key light direction.
@@ -79,7 +145,7 @@ function faceDirection(face: number, u: number, v: number): Vector3 {
   }
 }
 
-export function createSkyTexture(scene: Scene, palette: SkyPalette, size = 64): RawCubeTexture {
+export function createSkyTexture(scene: Scene, palette: SkyPalette, size = 128): RawCubeTexture {
   const faces: Uint8Array[] = [];
   for (let face = 0; face < 6; face++) {
     const data = new Uint8Array(size * size * 4);
@@ -158,7 +224,16 @@ export function createEnvironment(
   const sun = new DirectionalLight("sun", SUN_DIRECTION.clone(), scene);
   sun.intensity = options.sunIntensity;
   sun.diffuse = palette.sun;
+  // Fixed extents, sized to the stretch of run the camera can see rather than
+  // to the whole track. Left to fit the scene automatically the frustum has to
+  // span the entire run plus the ground plane, which spreads even a 2048 map so
+  // thin that the shadow is a shapeless blur. Pinned to the action and followed
+  // each frame, the same map resolves the channel and its legs.
   sun.autoUpdateExtends = false;
+  sun.orthoLeft = -SHADOW_EXTENT;
+  sun.orthoRight = SHADOW_EXTENT;
+  sun.orthoBottom = -SHADOW_EXTENT;
+  sun.orthoTop = SHADOW_EXTENT;
   sun.shadowMinZ = 5;
   sun.shadowMaxZ = 420;
 
@@ -167,8 +242,8 @@ export function createEnvironment(
     shadowGenerator = new ShadowGenerator(options.shadowMapSize, sun);
     shadowGenerator.usePercentageCloserFiltering = true;
     shadowGenerator.filteringQuality = ShadowGenerator.QUALITY_LOW;
-    shadowGenerator.bias = 0.0015;
-    shadowGenerator.normalBias = 0.4;
+    shadowGenerator.bias = 0.0008;
+    shadowGenerator.normalBias = 0.25;
     shadowGenerator.darkness = options.shadowDarkness;
   }
 

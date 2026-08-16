@@ -126,6 +126,8 @@ export class Race {
     /** Overridable so the tuning harness can isolate speed-related failures. */
     private readonly maxSpeed: number = DEFAULT_MAX_SPEED,
     private readonly theme: Theme = getTheme(null),
+    /** False in the headless harness, which has nothing to render into. */
+    private readonly visuals: boolean = true,
   ) {
     this.spawnMarbles(players);
   }
@@ -147,7 +149,7 @@ export class Race {
         .add(frame.right.scale(lateral))
         .add(frame.up.scale(TRACK_CONSTANTS.marbleRadius * 1.4));
 
-      const marble = new Marble(this.scene, player, position, this.theme.marble);
+      const marble = new Marble(this.scene, player, position, this.theme.marble, this.visuals);
       marble.freeze();
       marble.progressIndex = this.geometry.plan.startIndex;
       marble.distance = this.geometry.distanceAtIndex(marble.progressIndex);

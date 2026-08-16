@@ -1,6 +1,7 @@
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
+import type { RawTexture } from "@babylonjs/core/Materials/Textures/rawTexture";
 import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
 import { PhysicsAggregate } from "@babylonjs/core/Physics/v2/physicsAggregate";
 import {
@@ -10,6 +11,7 @@ import {
 import type { Scene } from "@babylonjs/core/scene";
 import { TRACK_CONSTANTS } from "../track/plan";
 import { createMarbleMaterial } from "../render/materials";
+import { marbleSwirl } from "../render/textures";
 import type { Theme } from "../render/theme";
 
 export interface Player {
@@ -41,6 +43,7 @@ const MARBLE = {
 export class Marble {
   readonly mesh: Mesh;
   readonly aggregate: PhysicsAggregate;
+  private readonly swirl: RawTexture | null;
 
   /** Fractional centreline index of the marble's current position. */
   progressIndex = 0;
@@ -95,20 +98,26 @@ export class Marble {
     readonly player: Player,
     position: Vector3,
     finish: Theme["marble"],
+    swirl = true,
   ) {
+    // 16 segments left a visibly faceted silhouette on the marble nearest the
+    // camera, which is the one the viewer is watching. The physics shape is an
+    // analytic sphere, so this costs nothing but vertices.
     this.mesh = CreateSphere(
       `marble-${player.id}`,
-      { diameter: MARBLE.radius * 2, segments: 16 },
+      { diameter: MARBLE.radius * 2, segments: 32 },
       scene,
     );
     this.mesh.position.copyFrom(position);
     this.mesh.isPickable = false;
 
+    this.swirl = swirl ? marbleSwirl(scene, player.id) : null;
     this.mesh.material = createMarbleMaterial(
       scene,
       `marble-mat-${player.id}`,
       Color3.FromHexString(player.color),
       finish,
+      this.swirl,
     );
 
     this.aggregate = new PhysicsAggregate(
@@ -195,6 +204,7 @@ export class Marble {
 
   dispose(): void {
     if (!this.retired) this.aggregate.dispose();
+    this.swirl?.dispose();
     this.mesh.material?.dispose();
     this.mesh.dispose();
   }

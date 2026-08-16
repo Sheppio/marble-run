@@ -70,8 +70,12 @@ try {
 
     await page.click(".btn-start");
     await page.waitForSelector(".hud-screen", { timeout: 60000 });
-    // Countdown flythrough, then a frame once the field is racing.
-    await page.waitForTimeout(11000);
+    // Mid-flythrough: the preview camera is high and wide, so this is the only
+    // frame that shows the sky and the run as a whole object.
+    await page.waitForTimeout(2600);
+    await page.screenshot({ path: join(SHOT_DIR, `theme-${slug}-preview.png`) });
+    // Then a frame once the field is racing.
+    await page.waitForTimeout(13400);
     await page.screenshot({ path: join(SHOT_DIR, `theme-${slug}-race.png`) });
     console.log(`captured ${theme}`);
   }

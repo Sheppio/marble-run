@@ -36,6 +36,8 @@ export interface Theme {
   track(seedValue: number): TimberPalette;
   /** How the track surface behaves in light. The palette supplies its colour. */
   trackSurface: SurfaceOptions;
+  /** Which generated detail map the track and scenery wear. */
+  material: "wood" | "plastic" | "panel";
   /** Legs, start gate and finish gantry. */
   decor: { gate: Color3; banner: Color3; support: Color3 };
   /** How a marble's surface behaves; its colour comes from the player. */
@@ -66,6 +68,7 @@ const WORKSHOP: Theme = {
     horizon: Color3.FromHexString("#79a7d8"),
     ground: Color3.FromHexString("#141a2a"),
     sun: Color3.FromHexString("#fff2d0"),
+    clouds: 0.45,
   },
   lighting: {
     sunIntensity: 2.8,
@@ -92,7 +95,10 @@ const WORKSHOP: Theme = {
       // a clear step lighter than the floor rather than a subtle one.
       wall: hsv(hue, saturation * 0.85, 0.26),
       underside: hsv(hue, saturation, 0.05),
-      stripe: hsv(hue + 10, saturation * 0.45, 0.4),
+      // Darker than the floor, not lighter: it reads as the joint between two
+      // planks, which is what a run built out of timber would actually have.
+      // A pale band over the grain looked like a spill of light on the deck.
+      stripe: hsv(hue - 4, saturation, 0.055),
     };
   },
   trackSurface: {
@@ -103,10 +109,13 @@ const WORKSHOP: Theme = {
     clearCoat: 0.18,
     environmentIntensity: 0.4,
   },
+  material: "wood",
   decor: {
     gate: Color3.FromHexString("#e8404f"),
     banner: Color3.FromHexString("#f2f4f8"),
-    support: Color3.FromHexString("#4a4038"),
+    // Warm, not the blue-grey it was: the legs sit against timber and lawn,
+    // and a cool grey read as scaffolding poles borrowed from another scene.
+    support: Color3.FromHexString("#3a2a1c"),
   },
   marble: {
     metallic: 0.0,
@@ -119,7 +128,7 @@ const WORKSHOP: Theme = {
   obstacles: {
     pin: { color: Color3.FromHexString("#c8d0dd"), surface: { metallic: 0.85, roughness: 0.22 } },
     post: { color: Color3.FromHexString("#e0b14a"), surface: { metallic: 0.6, roughness: 0.3 } },
-    structure: { color: Color3.FromHexString("#7d4f2a"), surface: { metallic: 0.0, roughness: 0.72 } },
+    structure: { color: Color3.FromHexString("#4e2f16"), surface: { metallic: 0.0, roughness: 0.72 } },
     barrier: { color: Color3.FromHexString("#2c3446"), surface: { metallic: 0.0, roughness: 0.9 } },
   },
 };
@@ -137,12 +146,17 @@ const CARTOON: Theme = {
     horizon: Color3.FromHexString("#bfe9ff"),
     ground: Color3.FromHexString("#7ec850"),
     sun: Color3.FromHexString("#ffffff"),
+    // Heavier and higher-contrast than Workshop's, to match the poster look.
+    clouds: 0.6,
   },
   lighting: {
     sunIntensity: 2.2,
     ambientIntensity: 0.95,
     environmentIntensity: 0.4,
-    shadowDarkness: 0.5,
+    // Not as pale as it was. A near-invisible shadow left the run looking
+    // pasted onto the lawn rather than standing over it, which undoes most of
+    // what the shadow pass is for even in a deliberately flat theme.
+    shadowDarkness: 0.32,
   },
   ground: Color3.FromHexString("#2c5c1f"),
   track(seedValue) {
@@ -152,7 +166,7 @@ const CARTOON: Theme = {
     // cool or neutral, so the warm end of the marble wheel always reads.
     const hue = CARTOON_HUES[seedValue % CARTOON_HUES.length];
     return {
-      floor: hsv(hue, 0.5, 0.28),
+      floor: hsv(hue, 0.62, 0.3),
       // Poster paint: the wall is the same colour turned up, not a different
       // one, so the run reads as a single moulded object.
       wall: hsv(hue, 0.66, 0.62),
@@ -169,6 +183,7 @@ const CARTOON: Theme = {
     roughness: 0.85,
     environmentIntensity: 0.25,
   },
+  material: "plastic",
   decor: {
     gate: Color3.FromHexString("#ff4136"),
     banner: Color3.FromHexString("#ffffff"),
@@ -236,6 +251,7 @@ const NEON: Theme = {
     roughness: 0.3,
     environmentIntensity: 0.35,
   },
+  material: "panel",
   decor: {
     gate: Color3.FromHexString("#ff2e88"),
     banner: Color3.FromHexString("#39f0ff"),

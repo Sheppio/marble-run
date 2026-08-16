@@ -7,7 +7,8 @@ import { PhysicsAggregate } from "@babylonjs/core/Physics/v2/physicsAggregate";
 import { PhysicsShapeType } from "@babylonjs/core/Physics/v2/IPhysicsEnginePlugin";
 import type { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import type { Scene } from "@babylonjs/core/scene";
-import { createSurface } from "../render/materials";
+import { applyDetail, createSurface } from "../render/materials";
+import type { DetailMaps } from "../render/textures";
 import type { TrackGeometry, TrackFrame } from "./geometry";
 import { TRACK_CONSTANTS, type ObstacleSpec } from "./plan";
 import type { Theme } from "../render/theme";
@@ -84,23 +85,37 @@ function createWedge(name: string, width: number, length: number, height: number
 
   const positions: number[] = [];
   const indices: number[] = [];
+  const uvs: number[] = [];
 
-  // Bottom face, then top face.
-  for (const [x, z] of footprint) positions.push(x, 0, z);
-  for (const [x, z] of footprint) positions.push(x, height, z);
-  indices.push(0, 2, 1); // bottom, wound downward
-  indices.push(3, 4, 5); // top
+  // Every face gets its own copy of its corners rather than sharing them round
+  // the solid. Shared corners make `ComputeNormals` average across the edges,
+  // and a five-faced solid with smoothed edges shades like a soft blob — the
+  // wedge read as a paper shard rather than a block of wood.
+  const face = (points: Array<[number, number, number]>) => {
+    const base = positions.length / 3;
+    for (const [x, y, z] of points) {
+      positions.push(x, y, z);
+      // Planar mapping, good enough for a solid this small.
+      uvs.push(x * 0.2 + z * 0.2, y * 0.2);
+    }
+    for (let i = 2; i < points.length; i++) indices.push(base, base + i - 1, base + i);
+  };
 
-  // Three side walls.
-  for (let i = 0; i < 3; i++) {
-    const j = (i + 1) % 3;
-    indices.push(i, j, j + 3, i, j + 3, i + 3);
-  }
+  const [apex, right, left] = footprint;
+  const lo = (p: [number, number]): [number, number, number] => [p[0], 0, p[1]];
+  const hi = (p: [number, number]): [number, number, number] => [p[0], height, p[1]];
+
+  face([lo(apex), lo(left), lo(right)]); // bottom, wound downward
+  face([hi(apex), hi(right), hi(left)]); // top
+  face([lo(apex), lo(right), hi(right), hi(apex)]); // right cheek
+  face([lo(left), lo(apex), hi(apex), hi(left)]); // left cheek
+  face([lo(right), lo(left), hi(left), hi(right)]); // flat back
 
   const mesh = new Mesh(name, scene);
   const data = new VertexData();
   data.positions = positions;
   data.indices = indices;
+  data.uvs = uvs;
   const normals: number[] = [];
   VertexData.ComputeNormals(positions, indices, normals);
   data.normals = normals;
@@ -131,6 +146,7 @@ export function buildObstacles(
   geometry: TrackGeometry,
   specs: ObstacleSpec[],
   theme: Theme,
+  detail: DetailMaps | null = null,
 ): ObstacleSet {
   const statics: PhysicsAggregate[] = [];
   const shadowCasters: Mesh[] = [];
@@ -152,6 +168,12 @@ export function buildObstacles(
       finish.barrier.surface,
     ),
   };
+
+  // The structural obstacles are made of the same stuff as the run itself, so
+  // they wear the same grain. Without it a wedge reads as a plastic prop
+  // dropped onto a wooden track. Pins and posts stay smooth — they are metal.
+  applyDetail(materials.timber, detail);
+  applyDetail(materials.rubber, detail);
 
   const track = (index: number) => geometry.frameAt(index);
 

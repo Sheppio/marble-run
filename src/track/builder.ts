@@ -8,6 +8,7 @@ import type { Scene } from "@babylonjs/core/scene";
 import { TRACK_CONSTANTS } from "./plan";
 import type { TrackGeometry } from "./geometry";
 import { createTrackMaterial, type SurfaceOptions, type TimberPalette } from "../render/materials";
+import type { DetailMaps } from "../render/textures";
 
 /**
  * Sweeps the channel cross-section along the centreline to produce one solid
@@ -20,6 +21,15 @@ import { createTrackMaterial, type SurfaceOptions, type TimberPalette } from "..
 
 /** Chamfer at the floor-to-wall joint, in cm. */
 const FLOOR_CHAMFER = 0.35;
+
+/**
+ * Size of one texture tile on the track, in cm.
+ *
+ * Roughly ten marble diameters. Small enough that the grain is visible at the
+ * distance the broadcast camera sits at, large enough that it never turns into
+ * the shimmering moiré you get from tiling a detail map too tightly.
+ */
+const TEXTURE_TILE = 16;
 
 interface Profile {
   /** Lateral offsets, metres from the channel centre. */
@@ -67,12 +77,14 @@ export function buildTrackMesh(
   geometry: TrackGeometry,
   palette: TimberPalette,
   surface: SurfaceOptions,
+  detail: DetailMaps | null,
 ): TrackMeshes {
   const { frames } = geometry;
   const { shellThickness } = TRACK_CONSTANTS;
 
   const positions: number[] = [];
   const colors: number[] = [];
+  const uvs: number[] = [];
   const indices: number[] = [];
 
   // Each ring is inner profile (left→right) followed by outer profile
@@ -89,8 +101,17 @@ export function buildTrackMesh(
 
   const ringBase: number[] = [];
 
+  // Distance travelled along the centreline, so the texture runs down the
+  // length of the run at a constant scale regardless of how the frames are
+  // spaced. Measuring in centimetres and dividing by a tile size keeps the
+  // grain the same size on a long track as on a short one.
+  let travelled = 0;
+
   for (let i = 0; i < frames.length; i++) {
     const frame = frames[i];
+    if (i > 0) travelled += Vector3.Distance(frames[i - 1].position, frame.position);
+    const v = travelled / TEXTURE_TILE;
+
     const innerProfile = buildProfile(frame.width, frame.wallHeight, 0);
     const outerProfile = buildProfile(frame.width, frame.wallHeight, shellThickness);
 
@@ -99,11 +120,28 @@ export function buildTrackMesh(
     // A brighter band every so often gives a sense of speed and distance.
     const stripe = i % 16 < 2;
 
+    // Arc length across the cross-section, so U is evenly paced over the
+    // profile rather than bunching up on the short chamfer segments.
+    const spanOf = (profile: Profile) => {
+      const steps: number[] = [0];
+      let total = 0;
+      for (let k = 1; k < profileCount; k++) {
+        total += Math.hypot(profile.x[k] - profile.x[k - 1], profile.y[k] - profile.y[k - 1]);
+        steps.push(total);
+      }
+      return { steps, total };
+    };
+    const innerSpan = spanOf(innerProfile);
+    const outerSpan = spanOf(outerProfile);
+
     const push = (px: number, py: number, isOuter: boolean, profileIndex: number) => {
       const p = frame.position
         .add(frame.right.scale(px))
         .add(frame.up.scale(py));
       positions.push(p.x, p.y, p.z);
+
+      const span = isOuter ? outerSpan : innerSpan;
+      uvs.push(span.steps[profileIndex] / TEXTURE_TILE, v);
 
       // The outer two points on each side are wall; the rest is floor.
       const onWall = profileIndex < 2 || profileIndex >= profileCount - 2;
@@ -159,6 +197,7 @@ export function buildTrackMesh(
   vertexData.positions = positions;
   vertexData.indices = indices;
   vertexData.colors = colors;
+  vertexData.uvs = uvs;
   const normals: number[] = [];
   VertexData.ComputeNormals(positions, indices, normals);
   vertexData.normals = normals;
@@ -178,7 +217,7 @@ export function buildTrackMesh(
     vertexData.applyToMesh(shell, false);
   }
 
-  const material = createTrackMaterial(scene, "track-mat", surface);
+  const material = createTrackMaterial(scene, "track-mat", surface, detail);
   material.backFaceCulling = true;
   shell.material = material;
   shell.useVertexColors = true;

@@ -5,6 +5,7 @@ import { Scene } from "@babylonjs/core/scene";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
+import type { RawTexture } from "@babylonjs/core/Materials/Textures/rawTexture";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
 import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder";
@@ -21,7 +22,15 @@ import { buildTrackMesh, type TrackMeshes } from "../track/builder";
 import { buildObstacles, type ObstacleSet } from "../track/obstacles";
 import { hashSeed } from "../core/rng";
 import { createEnvironment, type WorldLighting } from "../render/environment";
-import { createSurface } from "../render/materials";
+import { applyDetail, createSurface } from "../render/materials";
+import {
+  chequerTexture,
+  grassDetail,
+  panelDetail,
+  plasticDetail,
+  woodDetail,
+  type DetailMaps,
+} from "../render/textures";
 import { getTheme, type Theme } from "../render/theme";
 import { detectQuality, type QualitySettings } from "./quality";
 import { BroadcastCamera } from "./camera";
@@ -82,6 +91,9 @@ export class World {
   private readonly trackMeshes: TrackMeshes;
   private readonly obstacles: ObstacleSet;
   private readonly decor: Mesh[] = [];
+  private readonly textures: DetailMaps[] = [];
+  private readonly trackDetail: DetailMaps | null;
+  private readonly extraTextures: RawTexture[] = [];
   private glow: DefaultRenderingPipeline | null = null;
   private startGate: Mesh | null = null;
   private gateOpenAmount = 0;
@@ -146,17 +158,23 @@ export class World {
           ...theme.lighting,
         });
 
+    // Generated once per race and shared by everything that wears them. The
+    // headless harness renders nothing, so it skips the bake entirely.
+    const trackDetail = this.headless ? null : this.makeDetail(theme.material);
+    this.trackDetail = trackDetail;
     this.trackMeshes = buildTrackMesh(
       this.scene,
       this.geometry,
       theme.track(paletteSeed),
       theme.trackSurface,
+      trackDetail,
     );
     this.obstacles = buildObstacles(
       this.scene,
       this.geometry,
       options.disableObstacles ? [] : this.plan.obstacles,
       theme,
+      trackDetail,
     );
 
     if (!this.headless) {
@@ -178,10 +196,18 @@ export class World {
       options.events,
       options.maxSpeed,
       theme,
+      !this.headless,
     );
 
     if (this.lighting?.shadowGenerator) {
       const shadowMap = this.lighting.shadowGenerator.getShadowMap();
+      // The run itself is the most important caster by far. Without it the
+      // track hangs over an unbroken lawn with nothing tying the two together,
+      // and no amount of surface detail fixes that — the shadow is what tells
+      // you the run is an object standing above the ground rather than a
+      // picture laid on top of it.
+      shadowMap?.renderList?.push(this.trackMeshes.shell);
+      for (const mesh of this.decor) shadowMap?.renderList?.push(mesh);
       for (const marble of this.race.marbles) shadowMap?.renderList?.push(marble.mesh);
       for (const caster of this.obstacles.shadowCasters) shadowMap?.renderList?.push(caster);
     }
@@ -201,29 +227,53 @@ export class World {
     });
   }
 
+  /**
+   * The starting gate: two uprights and a drop bar that lifts between them.
+   *
+   * It was a single slab the full width of the channel, and since the preview
+   * camera sits low and close during the countdown, that slab filled the frame
+   * — the first thing anyone saw of a race was a coloured rectangle. Splitting
+   * it into a frame you can see the grid through fixes that, and it reads as a
+   * piece of apparatus rather than a wall.
+   */
   private buildStartGate(): void {
     const frame = this.geometry.frameAt(this.plan.startIndex + 3);
-    const gate = CreateBox(
-      "start-gate",
-      { width: frame.width * 2.4, height: 4, depth: 0.4 },
-      this.scene,
-    );
-    gate.material = createSurface(this.scene, "gate-mat", this.theme.decor.gate, {
-      metallic: 0.1,
-      roughness: 0.35,
+    const m = Matrix.Identity();
+    Matrix.FromXYZAxesToRef(frame.right, frame.up, frame.tangent, m);
+    const rotation = Quaternion.FromRotationMatrix(m);
+    const span = frame.width * 2.5;
+
+    const material = createSurface(this.scene, "gate-mat", this.theme.decor.gate, {
+      metallic: 0.35,
+      roughness: 0.3,
       clearCoat: 0.5,
       glow: this.theme.bloom ? 0.7 : undefined,
     });
 
-    const m = Matrix.Identity();
-    Matrix.FromXYZAxesToRef(frame.right, frame.up, frame.tangent, m);
-    gate.rotationQuaternion = Quaternion.FromRotationMatrix(m);
-    gate.position = frame.position.add(frame.up.scale(2));
-    gate.isPickable = false;
+    for (const side of [-1, 1]) {
+      const upright = CreateCylinder(
+        "gate-post",
+        { diameter: 0.55, height: 7, tessellation: 12 },
+        this.scene,
+      );
+      upright.rotationQuaternion = rotation.clone();
+      upright.position = frame.position
+        .add(frame.right.scale(side * span * 0.5))
+        .add(frame.up.scale(3.2));
+      upright.material = material;
+      upright.isPickable = false;
+      this.decor.push(upright);
+    }
+
+    // Only the bar moves, so it is the one piece held on the field.
+    const bar = CreateBox("start-gate", { width: span, height: 1.1, depth: 0.45 }, this.scene);
+    bar.rotationQuaternion = rotation.clone();
+    bar.material = material;
+    bar.isPickable = false;
     // Purely visual: the marbles are kinematic until the flag drops, so the
     // gate never has to hold anything back.
-    this.startGate = gate;
-    this.decor.push(gate);
+    this.startGate = bar;
+    this.decor.push(bar);
   }
 
   private buildFinishLine(): void {
@@ -238,6 +288,18 @@ export class World {
       clearCoat: 0.4,
       glow: this.theme.bloom ? 0.7 : undefined,
     });
+
+    // The posts stay plain; only the banner and the line on the deck are
+    // chequered, so the flag reads without the whole gantry turning into a
+    // pattern.
+    const chequer = chequerTexture(this.scene);
+    this.extraTextures.push(chequer);
+    const flagMaterial = createSurface(this.scene, "finish-flag-mat", Color3.White(), {
+      metallic: 0.05,
+      roughness: 0.45,
+      glow: this.theme.bloom ? 0.5 : undefined,
+    });
+    flagMaterial.albedoTexture = chequer;
 
     const width = frame.width * 2.6;
     for (const side of [-1, 1]) {
@@ -258,7 +320,7 @@ export class World {
     const banner = CreateBox("finish-banner", { width, height: 2.1, depth: 0.2 }, this.scene);
     banner.rotationQuaternion = rotation.clone();
     banner.position = frame.position.add(frame.up.scale(10));
-    banner.material = bannerMaterial;
+    banner.material = flagMaterial;
     banner.isPickable = false;
     this.decor.push(banner);
 
@@ -266,7 +328,7 @@ export class World {
     const stripe = CreateBox("finish-stripe", { width, height: 0.1, depth: 1.8 }, this.scene);
     stripe.rotationQuaternion = rotation.clone();
     stripe.position = frame.position.add(frame.up.scale(0.07));
-    stripe.material = bannerMaterial;
+    stripe.material = flagMaterial;
     stripe.isPickable = false;
     this.decor.push(stripe);
   }
@@ -278,10 +340,16 @@ export class World {
       { diameterTop: 0.9, diameterBottom: 1.8, height: 1, tessellation: 8 },
       this.scene,
     );
-    pillar.material = createSurface(this.scene, "support-mat", this.theme.decor.support, {
-      metallic: 0.15,
-      roughness: 0.6,
+    const pillarMaterial = createSurface(this.scene, "support-mat", this.theme.decor.support, {
+      // Non-metallic and barely reflective. At metallic 0.15 with a full share
+      // of the environment, the legs mirrored the sky and came out lilac —
+      // dark brown timber reading as scaffolding poles.
+      metallic: 0.0,
+      roughness: 0.8,
+      environmentIntensity: 0.25,
     });
+    applyDetail(pillarMaterial, this.trackDetail);
+    pillar.material = pillarMaterial;
     pillar.isPickable = false;
 
     // Everything below the lowest point of the run is "the table".
@@ -313,6 +381,18 @@ export class World {
     pillar.thinInstanceSetBuffer("matrix", new Float32Array(matrices), 16);
     pillar.thinInstanceRefreshBoundingInfo(false);
     this.decor.push(pillar);
+  }
+
+  /** Bakes a detail map set and registers it for disposal. */
+  private makeDetail(kind: Theme["material"]): DetailMaps {
+    const maps =
+      kind === "wood"
+        ? woodDetail(this.scene)
+        : kind === "plastic"
+          ? plasticDetail(this.scene)
+          : panelDetail(this.scene);
+    this.textures.push(maps);
+    return maps;
   }
 
   /**
@@ -354,11 +434,21 @@ export class World {
 
     const floor = CreateGround("floor", { width: 1600, height: 1600, subdivisions: 1 }, this.scene);
     floor.position.y = lowest - TABLE_DROP;
-    floor.material = createSurface(this.scene, "floor-mat", this.theme.ground, {
+    const floorMaterial = createSurface(this.scene, "floor-mat", this.theme.ground, {
       metallic: 0.0,
       roughness: 0.95,
       environmentIntensity: 0.35,
     });
+    const grass = grassDetail(this.scene);
+    this.textures.push(grass);
+    applyDetail(floorMaterial, grass);
+    // The plane is 1600cm across; without a heavy tile the grass is a single
+    // smear. This puts a tile roughly every 25cm, about a hand's width.
+    grass.albedo.uScale = 64;
+    grass.albedo.vScale = 64;
+    grass.normal.uScale = 64;
+    grass.normal.vScale = 64;
+    floor.material = floorMaterial;
     floor.receiveShadows = true;
     floor.isPickable = false;
     floor.freezeWorldMatrix();
@@ -414,7 +504,7 @@ export class World {
     this.gateOpenAmount += (target - this.gateOpenAmount) * Math.min(1, dt * 5);
     const frame = this.geometry.frameAt(this.plan.startIndex + 3);
     this.startGate.position = frame.position.add(
-      frame.up.scale(2 + this.gateOpenAmount * 7),
+      frame.up.scale(1.4 + this.gateOpenAmount * 5.4),
     );
   }
 
@@ -428,6 +518,13 @@ export class World {
     this.engine.stopRenderLoop();
     this.race.dispose();
     this.glow?.dispose();
+    for (const maps of this.textures) {
+      maps.albedo.dispose();
+      maps.normal.dispose();
+    }
+    this.textures.length = 0;
+    for (const texture of this.extraTextures) texture.dispose();
+    this.extraTextures.length = 0;
     this.obstacles.dispose();
     this.trackMeshes.dispose();
     this.lighting?.dispose();
