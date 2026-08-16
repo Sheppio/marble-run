@@ -57,8 +57,50 @@ const MIN_CLEAR_LANE = TRACK_CONSTANTS.marbleRadius * 5.0;
 /** Gap between neighbouring pins in a pattern, edge to edge. */
 const MIN_PIN_GAP = TRACK_CONSTANTS.marbleRadius * 3.4;
 
+/**
+ * How far a baffle is swept downstream from square across the channel, in
+ * radians.
+ *
+ * Read at build time rather than captured in a module constant, so the tuning
+ * harness can override it — a constant is evaluated when the module loads,
+ * which is before any page script gets to set one.
+ */
+function baffleLean(): number {
+  const overrides = (globalThis as { __tuning?: Record<string, number> }).__tuning;
+  const value = overrides?.baffleLean;
+  return typeof value === "number" ? value : BAFFLE_LEAN;
+}
+
+/**
+ * Shipped baffle sweep, in radians (about 14°).
+ *
+ * Swept, not square. The instinct is that a baffle angled hard across the
+ * channel is what marbles jam against, and that relaxing it would let them
+ * slide past — it is the opposite. `npm run tune:baffles` over 60 seeds each:
+ *
+ *   5.7°   75.6% finish   28.3% all home   927 baffle stalls
+ *  10.3°   84.7%          38.3%            363
+ *  13.8°   93.1%          68.3%            229
+ *  17.2°   91.1%          71.7%            182
+ *
+ * A face closer to square across the channel stops a marble dead instead of
+ * guiding it along to the tip, and once one stops the rest of the field piles
+ * into it. Below about 13° that failure runs away.
+ *
+ * 13.8° looked like a free relaxation on finish rate alone, but it is not:
+ * measured twice, it raises interventions consistently (4.5 -> 5.7 per race
+ * over 60 seeds, 3.8 -> 4.9 over 100) and takes baffle-blamed stalls from 182
+ * to 229. More marbles eventually get home, but more of them have to be
+ * helped, and being helped is the thing that reads as a marble stuck on a
+ * baffle. 17.2° is the best of the four on that measure, so it stays.
+ *
+ * The lever for sticking is the baffle's reach across the channel, not its
+ * angle — see the reach comment below.
+ */
+const BAFFLE_LEAN = 0.3;
+
 /** Rotation carrying local axes onto the track frame at `frame`. */
-function frameRotation(frame: TrackFrame): Quaternion {
+export function frameRotation(frame: TrackFrame): Quaternion {
   const m = Matrix.Identity();
   Matrix.FromXYZAxesToRef(frame.right, frame.up, frame.tangent, m);
   return Quaternion.FromRotationMatrix(m);
@@ -273,6 +315,7 @@ export function buildObstacles(
         // Below the wall top, so a marble riding over one is not trapped.
         const height = 1.6;
 
+        const lean = baffleLean();
         const parts: Mesh[] = [];
         for (let i = 0; i < count; i++) {
           const f = track(spec.index - ((count - 1) * spacing) / 2 + i * spacing);
@@ -296,7 +339,7 @@ export function buildObstacles(
           // came to rest against one.
           baffle.rotationQuaternion = Quaternion.RotationAxis(
             new Vector3(0, 1, 0),
-            side * 0.3,
+            side * lean,
           ).multiply(frameRotation(f));
           baffle.position = f.position
             .add(f.right.scale(side * (f.width - reach / 2)))

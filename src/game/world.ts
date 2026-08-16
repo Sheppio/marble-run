@@ -10,6 +10,9 @@ import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
 import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder";
 import { DefaultRenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/defaultRenderingPipeline";
+import { PhysicsAggregate } from "@babylonjs/core/Physics/v2/physicsAggregate";
+import { PhysicsShapeType } from "@babylonjs/core/Physics/v2/IPhysicsEnginePlugin";
+import type { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import { HavokPlugin } from "@babylonjs/core/Physics/v2/Plugins/havokPlugin";
 import "@babylonjs/core/Physics/physicsEngineComponent";
 import "@babylonjs/core/Meshes/thinInstanceMesh";
@@ -19,7 +22,7 @@ import havokWasmUrl from "@babylonjs/havok/lib/esm/HavokPhysics.wasm?url";
 import { generateTrack } from "../track/generator";
 import { TrackGeometry } from "../track/geometry";
 import { buildTrackMesh, type TrackMeshes } from "../track/builder";
-import { buildObstacles, type ObstacleSet } from "../track/obstacles";
+import { buildObstacles, frameRotation, type ObstacleSet } from "../track/obstacles";
 import { hashSeed } from "../core/rng";
 import { createEnvironment, type WorldLighting } from "../render/environment";
 import { applyDetail, createSurface } from "../render/materials";
@@ -48,6 +51,18 @@ import { GRAVITY, TRACK_CONSTANTS, type TrackPlan } from "../track/plan";
 
 /** How far below the lowest point of the run its supporting surface sits. */
 const TABLE_DROP = 14;
+
+/**
+ * Test hook letting the basin test build a run without its end wall.
+ *
+ * Only exists so that test can demonstrate it is not vacuous: with the wall in
+ * place no marble leaves the track, which on its own would look identical to a
+ * test that checks nothing. Without it, 28 of 32 finishers fall 2.6m off the
+ * open end — which is what the game actually did before the wall was added.
+ */
+function skipEndWall(): boolean {
+  return (globalThis as { __noEndWall?: boolean }).__noEndWall === true;
+}
 
 let havokInstance: unknown = null;
 
@@ -95,6 +110,7 @@ export class World {
   private readonly trackDetail: DetailMaps | null;
   private readonly extraTextures: RawTexture[] = [];
   private glow: DefaultRenderingPipeline | null = null;
+  private endWall: PhysicsAggregate | null = null;
   private startGate: Mesh | null = null;
   private gateOpenAmount = 0;
   private previewProgress = 0;
@@ -178,6 +194,11 @@ export class World {
       trackDetail,
       this.quality.relief,
     );
+
+    // Built in the headless harness too. It is the only piece of scenery that
+    // is also a collider, so leaving it out would let the tuning runs diverge
+    // from the game they are meant to be measuring.
+    if (!skipEndWall()) this.buildEndWall();
 
     if (!this.headless) {
       this.buildFloor();
@@ -423,6 +444,56 @@ export class World {
   }
 
   /**
+   * The back wall of the catch basin.
+   *
+   * The generator lays out 55cm of run-off past the line and its comment says
+   * marbles are stopped by the end wall of the basin — but no such wall was
+   * ever built, so they rolled the length of the basin and dropped off the
+   * open end. A finisher keeps rolling for a couple of seconds before it is
+   * lifted off, which at racing pace is further than the basin is long, so
+   * this happened on essentially every race.
+   *
+   * Placed a little inside the final frame rather than on the lip, so a marble
+   * arriving fast is stopped by the wall rather than by the cap on the end of
+   * the shell, which it could ride up and over.
+   */
+  private buildEndWall(): void {
+    const frames = this.geometry.frames;
+    const frame = frames[Math.max(0, frames.length - 3)];
+    // Tall enough that a marble cannot climb it, and wider than the channel so
+    // there is no gap at either side to squeeze through.
+    const wall = CreateBox(
+      "end-wall",
+      { width: frame.width * 2 + TRACK_CONSTANTS.shellThickness * 2, height: 5, depth: 1.2 },
+      this.scene,
+    );
+    wall.rotationQuaternion = frameRotation(frame);
+    wall.position = frame.position.add(frame.up.scale(2.5));
+    wall.isPickable = false;
+
+    if (!this.headless) {
+      wall.material = createSurface(this.scene, "end-wall-mat", this.theme.decor.support, {
+        metallic: 0.0,
+        roughness: 0.7,
+        environmentIntensity: 0.3,
+        glow: this.theme.bloom ? 0.5 : undefined,
+      });
+      applyDetail(wall.material as PBRMaterial, this.trackDetail, this.quality.relief);
+      this.decor.push(wall);
+    }
+
+    this.endWall = new PhysicsAggregate(
+      wall,
+      PhysicsShapeType.BOX,
+      // Barely bouncy: marbles should arrive and settle, not rebound back over
+      // the line into the path of whoever is still racing.
+      { mass: 0, restitution: 0.05, friction: 0.5 },
+      this.scene,
+    );
+    if (this.headless) this.decor.push(wall);
+  }
+
+  /**
    * The surface the run stands on.
    *
    * Without it the track floats in an empty sky, which reads as a diagram
@@ -519,6 +590,7 @@ export class World {
     window.removeEventListener("resize", this.handleResize);
     this.engine.stopRenderLoop();
     this.race.dispose();
+    this.endWall?.dispose();
     this.glow?.dispose();
     for (const maps of this.textures) {
       maps.albedo.dispose();

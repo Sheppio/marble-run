@@ -427,14 +427,90 @@ export async function restTest(
   };
 }
 
+/**
+ * Checks that marbles which cross the line stay on the run.
+ *
+ * The generator lays out a catch basin past the finish, but for a long time
+ * nothing closed the end of it: a finisher keeps rolling for a couple of
+ * seconds before it is lifted off, which at racing pace carries it further
+ * than the basin is long, so marbles routinely rolled off the end in full
+ * view. This measures how far below the basin floor each marble ends up —
+ * a few centimetres is settling, a metre is falling.
+ */
+export async function basinTest(
+  seed: string,
+  playerCount = 6,
+  maxSimSeconds = 200,
+): Promise<{
+  seed: string;
+  finishers: number;
+  /** How far below the basin floor each finisher ended up, cm. */
+  drops: number[];
+  worstDrop: number;
+  fell: number;
+}> {
+  await initPhysics();
+
+  const names = Array.from({ length: playerCount }, (_, i) => `P${i + 1}`);
+  const world = new World({
+    canvas: null,
+    seed,
+    players: makePlayers(names),
+    headless: true,
+  });
+
+  const physicsEngine = world.scene.getPhysicsEngine();
+  const plugin = physicsEngine?.getPhysicsPlugin();
+  const bodies =
+    physicsEngine && "getBodies" in physicsEngine
+      ? (physicsEngine as { getBodies(): unknown[] }).getBodies()
+      : [];
+
+  world.startCountdown(0.25);
+  const maxSteps = Math.ceil(maxSimSeconds / FIXED_STEP);
+  let steps = 0;
+  while (world.race.isRunning() && steps < maxSteps) {
+    world.scene.onBeforePhysicsObservable.notifyObservers(world.scene);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (plugin as any)?.executeStep(FIXED_STEP, bodies);
+    world.scene.onAfterPhysicsObservable.notifyObservers(world.scene);
+    steps++;
+  }
+  if (world.race.isRunning()) world.race.forceComplete();
+
+  // The floor of the basin, taken at the last frame of the run.
+  const frames = world.geometry.frames;
+  const basinFloorY = frames[frames.length - 1].position.y;
+
+  const drops: number[] = [];
+  for (const marble of world.race.marbles) {
+    if (!marble.finished) continue;
+    drops.push(basinFloorY - marble.mesh.position.y);
+  }
+
+  world.dispose();
+
+  const worstDrop = drops.length ? Math.max(...drops) : 0;
+  return {
+    seed,
+    finishers: drops.length,
+    drops,
+    worstDrop,
+    // Anything more than a marble's own diameter below the floor has left it.
+    fell: drops.filter((d) => d > 4).length,
+  };
+}
+
 declare global {
   interface Window {
     runDiagnostic: typeof runDiagnostic;
     runSeed: typeof runSeed;
     restTest: typeof restTest;
+    basinTest: typeof basinTest;
   }
 }
 
 window.runDiagnostic = runDiagnostic;
 window.runSeed = runSeed;
 window.restTest = restTest;
+window.basinTest = basinTest;
