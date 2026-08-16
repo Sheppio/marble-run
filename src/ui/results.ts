@@ -81,11 +81,16 @@ export class ResultsScreen {
       ]);
     });
 
-    const rematch = el("button", { class: "btn btn-primary", type: "button", text: "Race again" });
-    rematch.addEventListener("click", () => this.callbacks.onRematch());
-
-    const newTrack = el("button", { class: "btn btn-ghost", type: "button", text: "New track" });
+    // A fresh track is the primary action, not a rematch. Once a race has been
+    // watched its track holds no surprises — the interesting thing is what the
+    // next seed builds — so the button most likely to be pressed is the one
+    // that generates a new one. Re-running the same track is still there for
+    // settling an argument about a close finish.
+    const newTrack = el("button", { class: "btn btn-primary", type: "button", text: "Next track" });
     newTrack.addEventListener("click", () => this.callbacks.onNewTrack());
+
+    const rematch = el("button", { class: "btn btn-ghost", type: "button", text: "Same track" });
+    rematch.addEventListener("click", () => this.callbacks.onRematch());
 
     const changeRacers = el("button", { class: "btn btn-ghost", type: "button", text: "Racers" });
     changeRacers.addEventListener("click", () => this.callbacks.onChangeRacers());
@@ -103,7 +108,7 @@ export class ResultsScreen {
       header,
       podium,
       el("div", { class: "result-list" }, rows),
-      el("div", { class: "action-row results-actions" }, [rematch, newTrack, changeRacers, share]),
+      el("div", { class: "action-row results-actions" }, [newTrack, rematch, changeRacers, share]),
     );
   }
 
