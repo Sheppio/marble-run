@@ -86,7 +86,7 @@ function tuning(name: string, fallback: number): number {
 }
 
 /**
- * Shipped baffle sweep, in radians (about 31.5°).
+ * Shipped baffle sweep, in radians (about 40.1°).
  *
  * This is the single most important number for whether marbles get stuck.
  *
@@ -117,13 +117,29 @@ function tuning(name: string, fallback: number): number {
  * general — the sweep had been searched downwards from the shipped value and
  * never upwards.
  *
- * 31.5° over 40.1° is a judgement call rather than a measurement: the two are
- * level on interventions and within noise of each other on stalls, and the
- * shallower one keeps the baffle more across the flow, which is what makes it
- * an obstacle rather than a guide rail. 40.1° is there if reliability ever
- * matters more than the shuffling.
+ * Those figures were taken at a reach of 0.7. Reach has since gone to 0.85,
+ * and the two interact, so the choice between the top two was re-measured at
+ * the current geometry. 150 seeds each:
+ *
+ *   31.5°   99.4% finish   96.7% all home   0.6 rescues   51 baffle stalls
+ *   40.1°   99.2%          95.3%            0.6           43
+ *
+ * Level on everything except baffle-blamed incidents, where the wider sweep is
+ * about a sixth better — and those incidents are the thing anyone actually
+ * notices, since a marble stopped on a baffle collects the field behind it.
+ * That is what decides it.
+ *
+ * Worth knowing how thin this is. At 60 seeds the same comparison had 31.5°
+ * at a flawless 100% on both headline figures and 40.1° behind it, which read
+ * as a clear regression and was noise: at 150 the gap closes to two races.
+ * Anything at this scale needs the larger sample before it means anything.
+ *
+ * The trade is real but small in both directions: on the 100-seed tuning run
+ * 31.5° keeps 97.0% of races with everyone home against 94.0% here, while this
+ * setting is the better one on baffle-blamed incidents in every sample taken.
+ * 31.5° is one constant away if the balance ever wants reversing.
  */
-const BAFFLE_LEAN = 0.55;
+const BAFFLE_LEAN = 0.7;
 
 /**
  * How far a baffle reaches across the channel, as a multiple of the channel's
