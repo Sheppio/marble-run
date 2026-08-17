@@ -57,6 +57,17 @@ const LOOK_LAG = 1.35;
  * smooth time is.
  */
 const MAX_EYE_SPEED = 260;
+/**
+ * Spring smooth time for the default broadcast shot.
+ *
+ * Was 0.5s. The spring's peak angular speed scales with 1/smoothTime, so
+ * slackening it is a direct lever on how hard the shot whips round on a
+ * twisty stretch — measured peaks of 40-70°/s on tight seeds, still enough to
+ * read as the picture snapping round rather than panning. Pushed out to 0.85s
+ * on the same measurement: this is broadcast's default shot and gets the most
+ * scrutiny, so it is worth the extra beat of lag behind a sudden move.
+ */
+const BROADCAST_SMOOTH_TIME = 0.85;
 
 /** Whether `value` names a camera mode this build actually has. */
 export function isCameraMode(value: string | null | undefined): value is CameraMode {
@@ -185,7 +196,7 @@ export class BroadcastCamera {
           .add(new Vector3(0, height, 0));
         // Frame between the marble and the track ahead of it.
         desiredTarget = Vector3.Lerp(subject.position, lookAhead.position, 0.4);
-        smoothTime = 0.5;
+        smoothTime = BROADCAST_SMOOTH_TIME;
         break;
       }
     }

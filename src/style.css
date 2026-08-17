@@ -659,11 +659,17 @@ body {
 }
 
 .countdown {
+  /* Anchored below the top bar rather than centred over the whole frame —
+     centred, the number sat right over the start gate during the one part of
+     the race the countdown exists to show off. Up here, under the seed and
+     camera chips, it stays clear of the grid and the barrier lifting. */
   position: absolute;
-  inset: 0;
+  top: 3.6rem;
+  left: 0;
+  right: 0;
   display: grid;
   place-items: center;
-  font-size: clamp(5rem, 26vw, 12rem);
+  font-size: clamp(4rem, 20vw, 9rem);
   font-weight: 900;
   letter-spacing: -0.05em;
   color: #fff;

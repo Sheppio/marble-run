@@ -56,6 +56,17 @@ export interface ObstacleSet {
 const MIN_CLEAR_LANE = TRACK_CONSTANTS.marbleRadius * 5.0;
 /** Gap between neighbouring pins in a pattern, edge to edge. */
 const MIN_PIN_GAP = TRACK_CONSTANTS.marbleRadius * 3.4;
+/**
+ * How close a wall-hugging pin sits to the true channel wall, edge to edge.
+ *
+ * `MIN_PIN_GAP` is deliberately wider than a marble so two pins in the same
+ * row let one through between them — that is the field doing its job. Applied
+ * at the wall too, the same gap becomes a lane straight past every pin: a
+ * marble that hugs the side never has to touch anything. This is the residual
+ * left once the wall-hugging pin closes that lane back down, small enough
+ * that nothing a marble's own width can fit through it.
+ */
+const WALL_PIN_MARGIN = TRACK_CONSTANTS.marbleRadius * 0.4;
 
 /**
  * How far a baffle is swept downstream from square across the channel, in
@@ -269,6 +280,38 @@ export function latticeOffsets(
   return offsets;
 }
 
+/** Diameter of a pin in a pin field, in cm. */
+export const PIN_DIAMETER = 0.75;
+
+/**
+ * The lateral offsets for one row of a pin field, including the wall-hugging
+ * pins that close off the side lanes.
+ *
+ * Exposed separately from `buildObstacles` so the tuning harness can check the
+ * geometry directly — whether a marble squeezing down the very edge of the
+ * channel can still do it without touching anything — without needing to
+ * build and simulate a whole track to find out.
+ *
+ * Triangle rows are handled by the caller, not here: they are deliberately
+ * narrower than the channel in their early rows, and closing that down would
+ * remove the shape rather than fix a gap.
+ */
+export function pinRowOffsets(channelWidth: number, staggered: boolean): number[] {
+  const pitch = PIN_DIAMETER + MIN_PIN_GAP;
+  const usable = Math.max(0, channelWidth - MIN_PIN_GAP - PIN_DIAMETER * 0.5);
+  const chosen = latticeOffsets(usable, pitch, staggered);
+
+  const marbleWidth = TRACK_CONSTANTS.marbleRadius * 2;
+  const outerPositive = Math.max(0, ...chosen);
+  const wallPositive = channelWidth - PIN_DIAMETER / 2 - WALL_PIN_MARGIN;
+  if (wallPositive - outerPositive > marbleWidth) chosen.push(wallPositive);
+  const outerNegative = Math.min(0, ...chosen);
+  const wallNegative = -(channelWidth - PIN_DIAMETER / 2 - WALL_PIN_MARGIN);
+  if (outerNegative - wallNegative > marbleWidth) chosen.push(wallNegative);
+
+  return chosen;
+}
+
 export function buildObstacles(
   scene: Scene,
   geometry: TrackGeometry,
@@ -333,12 +376,9 @@ export function buildObstacles(
       case "pins": {
         // A regular field of pins: either a bowling triangle or a full grid.
         const isTriangle = p.pattern < 0.5;
-        const diameter = 0.75;
         const height = 2.4;
         const rows = Math.round(p.rows);
         const rowGap = 3.2;
-        // Constant across every row, which is what lets the rows interlock.
-        const pitch = diameter + MIN_PIN_GAP;
 
         const parts: Mesh[] = [];
         for (let r = 0; r < rows; r++) {
@@ -349,19 +389,30 @@ export function buildObstacles(
           const staggered = r % 2 === 1;
 
           // Keep a marble-width gap between every pair of pins *and* between
-          // the outermost pins and the walls. Counting only the gaps between
-          // pins is the trap: it packs the outer pins hard against the walls,
-          // and a marble wedges in the slot that leaves.
-          const usable = Math.max(0, rowFrame.width - MIN_PIN_GAP - diameter * 0.5);
-          const lattice = latticeOffsets(usable, pitch, staggered);
-          // Bowling: one pin in the front row, growing by one each row back.
-          // Grid: as many as the channel holds.
-          const chosen = isTriangle ? lattice.slice(0, r + 1) : lattice;
+          // the outermost pins and the walls, and — for a grid — a wall pin
+          // wherever the regular lattice would otherwise leave a lane down the
+          // side. See `pinRowOffsets`.
+          //
+          // Bowling: one pin in the front row, growing by one each row back,
+          // and no wall pins — the open sides are the shape.
+          // Grid: as many as the channel holds, wall pins included.
+          const chosen = isTriangle
+            ? latticeOffsets(
+                Math.max(0, rowFrame.width - MIN_PIN_GAP - PIN_DIAMETER * 0.5),
+                PIN_DIAMETER + MIN_PIN_GAP,
+                staggered,
+              ).slice(0, r + 1)
+            : pinRowOffsets(rowFrame.width, staggered);
 
           for (const lateral of chosen) {
             const pin = CreateCylinder(
               "pin",
-              { diameterTop: diameter * 0.72, diameterBottom: diameter, height, tessellation: 10 },
+              {
+                diameterTop: PIN_DIAMETER * 0.72,
+                diameterBottom: PIN_DIAMETER,
+                height,
+                tessellation: 10,
+              },
               scene,
             );
             pin.rotationQuaternion = frameRotation(rowFrame);

@@ -17,6 +17,9 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { World, initPhysics } from "./game/world";
 import { makePlayers } from "./ui/players";
 import { FIXED_STEP } from "./game/race";
+import { generateTrack } from "./track/generator";
+import { TrackGeometry } from "./track/geometry";
+import { pinRowOffsets, PIN_DIAMETER } from "./track/obstacles";
 import {
   PHYSICS,
   POINT_SPACING,
@@ -602,6 +605,78 @@ export async function baffleQueueTest(
   return { seed, gradientDegrees, results };
 }
 
+/**
+ * Finds the first seed, from `seed-0` upward, whose track has a grid-pattern
+ * pin field, and reports where. Used by scripts that need to point a camera
+ * at one without hand-picking a seed.
+ */
+async function findGridPinField(
+  prefix: string,
+  tries: number,
+): Promise<{ seed: string; index: number } | null> {
+  await initPhysics();
+  for (let i = 0; i < tries; i++) {
+    const seed = `${prefix}-${i}`;
+    const world = new World({ canvas: null, seed, players: makePlayers(["A"]), headless: true });
+    const grid = world.plan.obstacles.find((o) => o.kind === "pins" && o.params.pattern >= 0.5);
+    world.dispose();
+    if (grid) return { seed, index: grid.index };
+  }
+  return null;
+}
+
+/**
+ * Checks, across many seeds, whether a marble can still get down the side of
+ * a grid pin field without touching a pin — the thing `pinRowOffsets`'s
+ * wall-hugging pins exist to prevent.
+ *
+ * Works from the track geometry directly rather than simulating a race: what
+ * matters is the gap the lattice actually leaves at the true wall, which is a
+ * property of the geometry alone. A marble narrower than the reported worst
+ * case could, in principle, run that row's edge untouched.
+ */
+async function checkPinWallGaps(
+  prefix: string,
+  seeds: number,
+): Promise<{ rows: number; worstGapCm: number; worstSeed: string; overMarbleWidth: number }> {
+  const marbleWidth = TRACK_CONSTANTS.marbleRadius * 2;
+  let rows = 0;
+  let worstGapCm = -Infinity;
+  let worstSeed = "";
+  let overMarbleWidth = 0;
+
+  for (let i = 0; i < seeds; i++) {
+    const seed = `${prefix}-${i}`;
+    const plan = generateTrack(seed);
+    const geometry = new TrackGeometry(plan);
+    const rowGap = 3.2;
+
+    for (const spec of plan.obstacles) {
+      if (spec.kind !== "pins" || spec.params.pattern < 0.5) continue;
+      const rowCount = Math.round(spec.params.rows);
+      for (let r = 0; r < rowCount; r++) {
+        const rowFrame = geometry.frameAt(spec.index - ((rowCount - 1) * rowGap) / 2 + r * rowGap);
+        const staggered = r % 2 === 1;
+        const offsets = pinRowOffsets(rowFrame.width, staggered);
+        rows++;
+
+        for (const side of [1, -1]) {
+          const outer =
+            side === 1 ? Math.max(0, ...offsets) : Math.min(0, ...offsets);
+          const gap = rowFrame.width - side * outer - PIN_DIAMETER / 2;
+          if (gap > worstGapCm) {
+            worstGapCm = gap;
+            worstSeed = seed;
+          }
+          if (gap >= marbleWidth) overMarbleWidth++;
+        }
+      }
+    }
+  }
+
+  return { rows, worstGapCm, worstSeed, overMarbleWidth };
+}
+
 declare global {
   interface Window {
     runDiagnostic: typeof runDiagnostic;
@@ -609,6 +684,8 @@ declare global {
     restTest: typeof restTest;
     basinTest: typeof basinTest;
     baffleQueueTest: typeof baffleQueueTest;
+    findGridPinField: typeof findGridPinField;
+    checkPinWallGaps: typeof checkPinWallGaps;
   }
 }
 
@@ -617,3 +694,5 @@ window.runSeed = runSeed;
 window.restTest = restTest;
 window.basinTest = basinTest;
 window.baffleQueueTest = baffleQueueTest;
+window.findGridPinField = findGridPinField;
+window.checkPinWallGaps = checkPinWallGaps;

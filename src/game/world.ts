@@ -181,7 +181,6 @@ export class World {
   private endWall: PhysicsAggregate | null = null;
   private startGate: Mesh | null = null;
   private gateBody: PhysicsAggregate | null = null;
-  private gateMaterial: PBRMaterial | null = null;
   private gateOpenAmount = 0;
   private previewProgress = 0;
   private running = false;
@@ -373,13 +372,20 @@ export class World {
   }
 
   /**
-   * The starting gate: two uprights and a drop bar that lifts between them.
+   * The starting gate: two uprights and a chequered drop bar that lifts
+   * between them.
    *
    * It was a single slab the full width of the channel, and since the preview
    * camera sits low and close during the countdown, that slab filled the frame
    * — the first thing anyone saw of a race was a coloured rectangle. Splitting
    * it into a frame you can see the grid through fixes that, and it reads as a
    * piece of apparatus rather than a wall.
+   *
+   * Built to match the finish gantry rather than as its own thing — plain
+   * posts in the theme's gate colour, and the crossbar wearing the same
+   * chequer flag the finish banner does. Racing start and finish gates share a
+   * visual language on a real track, and a plain slab of colour here read as a
+   * different, cruder object next to the finish.
    *
    * The bar is a real barrier, not a prop. The marbles come alive when the
    * countdown starts, roll the last centimetre or so down the shelf and settle
@@ -395,28 +401,27 @@ export class World {
     const span = frame.width * 2.5;
 
     if (!this.headless) {
-      const material = createSurface(this.scene, "gate-mat", this.theme.decor.gate, {
-        metallic: 0.35,
-        roughness: 0.3,
-        clearCoat: 0.5,
+      const postMaterial = createSurface(this.scene, "gate-mat", this.theme.decor.gate, {
+        metallic: 0.15,
+        roughness: 0.35,
+        clearCoat: 0.4,
         glow: this.theme.bloom ? 0.7 : undefined,
       });
 
       for (const side of [-1, 1]) {
         const upright = CreateCylinder(
           "gate-post",
-          { diameter: 0.55, height: 7, tessellation: 12 },
+          { diameter: 0.6, height: 7, tessellation: 10 },
           this.scene,
         );
         upright.rotationQuaternion = rotation.clone();
         upright.position = frame.position
           .add(frame.right.scale(side * span * 0.5))
           .add(frame.up.scale(3.2));
-        upright.material = material;
+        upright.material = postMaterial;
         upright.isPickable = false;
         this.decor.push(upright);
       }
-      this.gateMaterial = material;
     }
 
     // Tall enough to cover a whole marble and set flush with the floor, so
@@ -430,7 +435,7 @@ export class World {
     bar.rotationQuaternion = rotation.clone();
     bar.position = frame.position.add(frame.up.scale(GATE_BAR_HEIGHT / 2));
     bar.isPickable = false;
-    if (this.gateMaterial) bar.material = this.gateMaterial;
+    if (!this.headless) bar.material = this.flagMaterial("gate-bar-mat", span, GATE_BAR_HEIGHT);
     this.startGate = bar;
     this.decor.push(bar);
 
@@ -442,6 +447,27 @@ export class World {
       { mass: 0, restitution: 0.02, friction: 0.4 },
       this.scene,
     );
+  }
+
+  /**
+   * A chequered material fitted to one rectangular face.
+   *
+   * Shared by the finish banner, the finish deck stripe and the start bar, so
+   * all three read as the same flag apparatus. Each gets its own texture
+   * instance rather than sharing one because the tiling has to be worked out
+   * from that face's own proportions, and the three are different shapes.
+   */
+  private flagMaterial(name: string, faceWidth: number, faceHeight: number, swap = false): PBRMaterial {
+    const chequer = chequerTexture(this.scene);
+    fitChequer(chequer, faceWidth, faceHeight, CHEQUER_CELL, { swapAxes: swap });
+    this.extraTextures.push(chequer);
+    const material = createSurface(this.scene, name, Color3.White(), {
+      metallic: 0.05,
+      roughness: 0.45,
+      glow: this.theme.bloom ? 0.5 : undefined,
+    });
+    material.albedoTexture = chequer;
+    return material;
   }
 
   private buildFinishLine(): void {
@@ -462,23 +488,6 @@ export class World {
     // The posts stay plain; only the banner and the line on the deck are
     // chequered, so the flag reads without the whole gantry turning into a
     // pattern.
-    //
-    // They get a texture each rather than sharing one, because the tiling has
-    // to be worked out from each face's own proportions and the two are
-    // different shapes — the banner stands 2.1cm tall, the deck stripe is
-    // 1.8cm deep.
-    const flagMaterial = (name: string, faceWidth: number, faceHeight: number, swap = false) => {
-      const chequer = chequerTexture(this.scene);
-      fitChequer(chequer, faceWidth, faceHeight, CHEQUER_CELL, { swapAxes: swap });
-      this.extraTextures.push(chequer);
-      const material = createSurface(this.scene, name, Color3.White(), {
-        metallic: 0.05,
-        roughness: 0.45,
-        glow: this.theme.bloom ? 0.5 : undefined,
-      });
-      material.albedoTexture = chequer;
-      return material;
-    };
     for (const side of [-1, 1]) {
       const post = CreateCylinder(
         "finish-post",
@@ -502,7 +511,7 @@ export class World {
     );
     banner.rotationQuaternion = rotation.clone();
     banner.position = frame.position.add(frame.up.scale(10));
-    banner.material = flagMaterial("finish-flag-mat", width, bannerHeight);
+    banner.material = this.flagMaterial("finish-flag-mat", width, bannerHeight);
     banner.isPickable = false;
     this.decor.push(banner);
 
@@ -518,7 +527,7 @@ export class World {
     stripe.position = frame.position.add(frame.up.scale(0.07));
     // Swapped: the deck strip is read off the box's top face, whose UVs run a
     // quarter turn from the upright faces the banner uses.
-    stripe.material = flagMaterial("finish-stripe-mat", width, stripeDepth, true);
+    stripe.material = this.flagMaterial("finish-stripe-mat", width, stripeDepth, true);
     stripe.isPickable = false;
     this.decor.push(stripe);
   }
