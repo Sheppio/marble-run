@@ -426,6 +426,34 @@ body {
   -webkit-backdrop-filter: blur(10px);
 }
 
+/* The clock and its pause button, stacked as one unit so the button reads as
+   belonging to the timer rather than as another top-bar chip. */
+.clock-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.3rem;
+}
+
+.btn-pause {
+  pointer-events: auto;
+  font-size: 0.68rem;
+  padding: 0.2rem 0.5rem;
+  min-height: 0;
+  background: rgba(7, 10, 20, 0.55);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.btn-pause-active {
+  background: linear-gradient(135deg, var(--accent), #2f7fe0);
+  border-color: transparent;
+  color: #051021;
+  font-weight: 700;
+}
+
 /* Holds the board and its layout toggle together, so the button travels with
    the board rather than sitting somewhere fixed. */
 .board-dock {

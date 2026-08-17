@@ -521,13 +521,15 @@ export function startBannerTexture(
   }
   ctx.restore();
 
-  // Text sits in the top third of the bar, clear of where the queued field's
-  // own heads reach — see the function comment above.
-  const textY = height * 0.28;
+  // Text sits high in the top portion, clear of where the queued field's own
+  // heads reach — see the function comment above. Pulled close to the top
+  // edge rather than centred on the top half, which is what leaves room for
+  // as big a word as fits above the marbles.
+  const textY = height * 0.19;
 
   // A soft highlight behind the text, so it sits on its own patch of light
   // rather than straddling a stripe seam wherever the layout happens to land.
-  const gradient = ctx.createRadialGradient(width / 2, textY, 0, width / 2, textY, width * 0.3);
+  const gradient = ctx.createRadialGradient(width / 2, textY, 0, width / 2, textY, width * 0.32);
   gradient.addColorStop(0, "rgba(255,255,255,0.85)");
   gradient.addColorStop(1, "rgba(255,255,255,0)");
   ctx.fillStyle = gradient;
@@ -535,9 +537,9 @@ export function startBannerTexture(
 
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.font = `900 ${Math.round(height * 0.34)}px Arial, sans-serif`;
+  ctx.font = `900 ${Math.round(height * 0.42)}px Arial, sans-serif`;
   ctx.lineJoin = "round";
-  ctx.lineWidth = height * 0.055;
+  ctx.lineWidth = height * 0.06;
   ctx.strokeStyle = "#1a1a1a";
   ctx.strokeText("START", width / 2, textY);
   ctx.fillStyle = light.toHexString();

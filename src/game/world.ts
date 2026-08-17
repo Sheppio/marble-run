@@ -188,6 +188,7 @@ export class World {
   private gateOpenAmount = 0;
   private previewProgress = 0;
   private running = false;
+  private paused = false;
   private intro: IntroPhase = "none";
   private introTime = 0;
   private introSeconds = 3;
@@ -868,11 +869,27 @@ export class World {
     return true;
   }
 
+  /**
+   * Toggles the whole race — physics, camera, clock — frozen or running.
+   *
+   * Skipping the render loop's body entirely rather than, say, zeroing the
+   * physics timestep: nothing here has any per-frame state that needs to keep
+   * ticking while paused (the stuck watchdog and the gate animation both work
+   * in elapsed real time, which simply stops accumulating), and it means a
+   * paused frame costs nothing beyond whatever the browser spends idling a
+   * requestAnimationFrame loop.
+   */
+  togglePause(): boolean {
+    this.paused = !this.paused;
+    return this.paused;
+  }
+
   /** Kicks off the render loop. */
   run(onFrame?: (dt: number) => void): void {
     if (this.running) return;
     this.running = true;
     this.engine.runRenderLoop(() => {
+      if (this.paused) return;
       const dt = Math.min(0.1, this.engine.getDeltaTime() / 1000);
 
       if (this.updateIntro(dt)) {

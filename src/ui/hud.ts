@@ -17,6 +17,8 @@ const THREE_COLUMN_FROM = 9;
 
 export interface HudCallbacks {
   onCycleCamera(): string;
+  /** Returns the new paused state. */
+  onTogglePause(): boolean;
 }
 
 interface Row {
@@ -33,6 +35,7 @@ export class Hud {
   private boardNode!: HTMLElement;
   private countdownNode!: HTMLElement;
   private cameraButton!: HTMLButtonElement;
+  private pauseButton!: HTMLButtonElement;
   private rows = new Map<number, Row>();
   private dockNode!: HTMLElement;
   private layoutButton!: HTMLButtonElement;
@@ -51,6 +54,22 @@ export class Hud {
 
   private build(seed: string, cameraLabel: string): void {
     this.clockNode = el("span", { class: "clock", text: "0.00" });
+
+    // Sits directly under the clock rather than alongside the camera button,
+    // so it reads as "the timer's own control" instead of another item in the
+    // top bar's row of unrelated chips.
+    this.pauseButton = el("button", {
+      class: "btn btn-pause",
+      type: "button",
+      text: "Pause",
+      title: "Pause the race",
+    });
+    this.pauseButton.addEventListener("click", () => {
+      const paused = this.callbacks.onTogglePause();
+      this.pauseButton.textContent = paused ? "Resume" : "Pause";
+      this.pauseButton.classList.toggle("btn-pause-active", paused);
+    });
+    const clockStack = el("div", { class: "clock-stack" }, [this.clockNode, this.pauseButton]);
 
     this.boardNode = el("div", { class: "leaderboard" });
 
@@ -94,7 +113,7 @@ export class Hud {
         el("span", { class: "hud-seed-value", text: seed }),
       ]),
       this.cameraButton,
-      this.clockNode,
+      clockStack,
     ]);
 
     this.countdownNode = el("div", { class: "countdown" });

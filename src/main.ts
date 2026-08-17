@@ -167,6 +167,7 @@ async function startRace(isRetry = false): Promise<void> {
       saveCameraMode(cameraMode);
       return activeWorld.camera.modeLabel;
     },
+    onTogglePause: () => activeWorld.togglePause(),
   });
   showScreen(hud);
 
