@@ -6,6 +6,7 @@ import {
   PHYSICS,
   POINT_SPACING,
   TRACK_CONSTANTS,
+  UNITS_PER_METRE,
   type GapSpec,
   type ObstacleKind,
   type ObstacleSpec,
@@ -765,9 +766,41 @@ const HIGHLIGHT_LABELS: Record<ObstacleKind, string> = {
 };
 
 /**
+ * Shortest a track is allowed to come out, in world units (cm).
+ *
+ * The body-building loop below aims for 1500-2000 (15-20m) and almost always
+ * gets there, but it is walking a randomly generated path across a finite
+ * arena and avoiding its own earlier passes — on a sufficiently cramped seed
+ * it can run out of room to extend into and stop well short of that target.
+ * A short track is not just a lesser race, it can finish in a couple of
+ * seconds, which reads as broken rather than as a valid if modest layout.
+ */
+const MIN_TRACK_LENGTH = 10 * UNITS_PER_METRE;
+/** How many different attempts to try before giving up and using the best one. */
+const MAX_GENERATION_ATTEMPTS = 6;
+
+/**
  * Builds a complete, deterministic track plan for the given seed.
+ *
+ * Retries under the hood on a derived seed if the first attempt comes up
+ * short of `MIN_TRACK_LENGTH` — see there for why that can happen. Still
+ * fully deterministic: the same input seed always walks the same sequence of
+ * retry seeds and lands on the same result.
  */
 export function generateTrack(seedText: string): TrackPlan {
+  let best: TrackPlan | null = null;
+  for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt++) {
+    const plan = generateTrackAttempt(attempt === 0 ? seedText : `${seedText}:retry:${attempt}`);
+    if (plan.totalLength >= MIN_TRACK_LENGTH) return plan;
+    if (!best || plan.totalLength > best.totalLength) best = plan;
+  }
+  // Every attempt came up short — vanishingly unlikely given the 15-20m
+  // target, but a merely-short track beats an infinite retry loop or a
+  // thrown error. Ship the longest of what was tried.
+  return best as TrackPlan;
+}
+
+function generateTrackAttempt(seedText: string): TrackPlan {
   const rng = new Rng(seedText);
 
   // Which way this run winds, and where it starts.

@@ -57,16 +57,25 @@ const MIN_CLEAR_LANE = TRACK_CONSTANTS.marbleRadius * 5.0;
 /** Gap between neighbouring pins in a pattern, edge to edge. */
 const MIN_PIN_GAP = TRACK_CONSTANTS.marbleRadius * 3.4;
 /**
- * How close a wall-hugging pin sits to the true channel wall, edge to edge.
+ * How far a wall-hugging pin overlaps into the true channel wall.
  *
  * `MIN_PIN_GAP` is deliberately wider than a marble so two pins in the same
  * row let one through between them — that is the field doing its job. Applied
  * at the wall too, the same gap becomes a lane straight past every pin: a
- * marble that hugs the side never has to touch anything. This is the residual
- * left once the wall-hugging pin closes that lane back down, small enough
- * that nothing a marble's own width can fit through it.
+ * marble that hugs the side never has to touch anything.
+ *
+ * A wall-hugging pin closes that lane, but a pin left standing a hair off the
+ * wall — even a gap far too narrow for a marble to pass through — still opens
+ * a V-shaped pocket between the pin's curved face and the flat wall behind
+ * it. A marble arriving into that pocket can end up touching both surfaces at
+ * once with nothing pushing it back out, which is a dead stop, not a
+ * deflection. Embedding the pin into the wall instead of stopping short of it
+ * removes the pocket rather than narrowing it: there is no exposed corner
+ * left for anything to nestle into. Comfortably inside the wall's own
+ * thickness (`shellThickness`), so the embedded part is buried in solid
+ * material rather than poking out the far side.
  */
-const WALL_PIN_MARGIN = TRACK_CONSTANTS.marbleRadius * 0.4;
+const WALL_PIN_EMBED = TRACK_CONSTANTS.marbleRadius * 0.5;
 
 /**
  * How far a baffle is swept downstream from square across the channel, in
@@ -303,10 +312,10 @@ export function pinRowOffsets(channelWidth: number, staggered: boolean): number[
 
   const marbleWidth = TRACK_CONSTANTS.marbleRadius * 2;
   const outerPositive = Math.max(0, ...chosen);
-  const wallPositive = channelWidth - PIN_DIAMETER / 2 - WALL_PIN_MARGIN;
+  const wallPositive = channelWidth - PIN_DIAMETER / 2 + WALL_PIN_EMBED;
   if (wallPositive - outerPositive > marbleWidth) chosen.push(wallPositive);
   const outerNegative = Math.min(0, ...chosen);
-  const wallNegative = -(channelWidth - PIN_DIAMETER / 2 - WALL_PIN_MARGIN);
+  const wallNegative = -(channelWidth - PIN_DIAMETER / 2 + WALL_PIN_EMBED);
   if (outerNegative - wallNegative > marbleWidth) chosen.push(wallNegative);
 
   return chosen;

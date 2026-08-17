@@ -410,10 +410,15 @@ body {
 }
 
 .clock {
-  /* Equal-width digits where the font has them, and a floor wide enough for
-     the usual mm.ss so the box does not pulse where it does not. */
+  /* A fixed width rather than a floor: min-width still let the box grow the
+     moment a race crossed the one-minute mark and the format switched from
+     "59.99" to "1:00.00", which read as the whole clock-and-pause-button
+     stack jumping sideways. Sized for the widest format the clock ever shows
+     — a single-digit minute, since MAX_RACE_SECONDS keeps every race under
+     ten minutes — so it never needs to change once, however long the race
+     runs. */
   font-variant-numeric: tabular-nums;
-  min-width: 5ch;
+  width: 5.6rem;
   text-align: center;
   font-size: 1.4rem;
   font-weight: 800;

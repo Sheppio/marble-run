@@ -72,20 +72,27 @@ const BROADCAST_SMOOTH_TIME = 0.85;
 
 /**
  * How far ahead of the subject, in centreline points, the "oncoming" camera
- * plants itself. At `POINT_SPACING` = 1.2cm this is about 96cm of runway —
- * enough that the marble is a small, clearly-approaching shape rather than
- * already filling the frame the moment the shot cuts to it.
+ * plants itself. At `POINT_SPACING` = 1.2cm this is about 96cm of runway.
+ *
+ * Was 80 (96cm). Measured against real races that was barely a marble's own
+ * travel time — the leader was already at or past the vantage point, or past
+ * the edge of frame on a bend, within a second or two of the cut happening.
+ * Tripled: enough runway that the field is a small shape a clear distance out
+ * when the shot picks them up, with time to watch them close the gap.
  */
-const REVERSE_LOOKAHEAD = 80;
+const REVERSE_LOOKAHEAD = 240;
 /**
  * How close the subject may get to the current vantage point before the
  * camera jumps to a new one further on.
  *
  * Not zero: waiting for the marble to reach the exact anchor point would let
  * it fill the frame and roll past the camera before the cut happens. Jumping
- * a little early keeps the marble a comfortable distance out.
+ * a little early keeps the marble a comfortable distance out. Scaled up
+ * alongside `REVERSE_LOOKAHEAD` so the cut still happens at roughly the same
+ * fraction of the runway rather than firing almost immediately on the now much
+ * longer approach.
  */
-const REVERSE_RETRIGGER = 18;
+const REVERSE_RETRIGGER = 50;
 
 /** Whether `value` names a camera mode this build actually has. */
 export function isCameraMode(value: string | null | undefined): value is CameraMode {
@@ -205,14 +212,17 @@ export class BroadcastCamera {
           this.handoff = HANDOFF_SECONDS;
         }
         const anchor = this.geometry.frameAt(this.reverseAnchorIndex);
-        // Off to one side and modestly raised, like a trackside camera rather
-        // than one hanging directly over the channel — sitting on the
-        // centreline put the marbles at the very edge of frame instead of
-        // approaching through the middle of it.
-        const lateral = 20 + Math.sin(this.swing) * 8;
+        // Off to one side and raised, like a trackside camera rather than one
+        // hanging directly over the channel — sitting on the centreline put
+        // the marbles at the very edge of frame instead of approaching
+        // through the middle of it. Both are bigger than a close-in shot
+        // would need: the runway is long enough now to cross a bend, and a
+        // camera sitting low and tight to the track loses the subject off the
+        // side of frame the moment the track curves away from it.
+        const lateral = 30 + Math.sin(this.swing) * 8;
         desiredPosition = anchor.position
           .add(anchor.right.scale(lateral))
-          .add(anchor.up.scale(16));
+          .add(anchor.up.scale(26));
         // Looking back at the subject, not ahead of it — the whole point of
         // this shot is watching it approach.
         desiredTarget = subject.position;
@@ -255,8 +265,13 @@ export class BroadcastCamera {
           .subtract(lookAhead.tangent.scale(back))
           .add(frame.right.scale(lateral))
           .add(new Vector3(0, height, 0));
-        // Frame between the marble and the track ahead of it.
-        desiredTarget = Vector3.Lerp(subject.position, lookAhead.position, 0.4);
+        // Frame between the marble and the track ahead of it, weighted
+        // towards the marble itself. Was an even 0.4 towards the track ahead,
+        // which put the leader closer to the edge of frame than the centre —
+        // fine on a straight, but on a bend the track-ahead point can swing
+        // wide enough that the marble the shot is actually about is the thing
+        // nearest falling out of it.
+        desiredTarget = Vector3.Lerp(subject.position, lookAhead.position, 0.22);
         smoothTime = BROADCAST_SMOOTH_TIME;
         break;
       }

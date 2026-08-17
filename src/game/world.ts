@@ -8,6 +8,7 @@ import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { BaseTexture } from "@babylonjs/core/Materials/Textures/baseTexture";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
+import { CreatePlane } from "@babylonjs/core/Meshes/Builders/planeBuilder";
 import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder";
 import { DefaultRenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/defaultRenderingPipeline";
 import { PhysicsAggregate } from "@babylonjs/core/Physics/v2/physicsAggregate";
@@ -431,7 +432,8 @@ export class World {
 
     // Tall enough to cover a whole marble and set flush with the floor, so
     // nothing rolls under it or hops over; wider than the channel, so nothing
-    // slips down either side.
+    // slips down either side. Carries the collider and, on the upstream face
+    // the countdown camera actually looks at, the banner too.
     const bar = CreateBox(
       "start-gate",
       { width: span, height: GATE_BAR_HEIGHT, depth: 0.45 },
@@ -443,6 +445,31 @@ export class World {
     if (!this.headless) bar.material = this.startGateMaterial(span, GATE_BAR_HEIGHT);
     this.startGate = bar;
     this.decor.push(bar);
+
+    // A box's two large faces share one texture through opposite halves of
+    // its default UV, so a word that reads correctly from one side reads
+    // backwards from the other — invisible as long as only one side is ever
+    // in shot, which stopped being true once the "oncoming" camera started
+    // planting itself past the gate and looking back at it. Rather than fight
+    // that UV relationship, the downstream face gets its own plane, mounted a
+    // hair proud of the box so it — not the box's own mirrored face — is what
+    // a camera on that side actually sees, drawn from a second, independently
+    // correct copy of the same texture.
+    if (!this.headless) {
+      const faceGap = 0.25;
+      const downstream = CreatePlane(
+        "start-gate-downstream",
+        { width: span, height: GATE_BAR_HEIGHT },
+        this.scene,
+      );
+      const md = Matrix.Identity();
+      Matrix.FromXYZAxesToRef(frame.right.scale(-1), frame.up, frame.tangent.scale(-1), md);
+      downstream.rotationQuaternion = Quaternion.FromRotationMatrix(md);
+      downstream.position = bar.position.add(frame.tangent.scale(faceGap));
+      downstream.material = this.startGateMaterial(span, GATE_BAR_HEIGHT);
+      downstream.isPickable = false;
+      this.decor.push(downstream);
+    }
 
     this.gateBody = new PhysicsAggregate(
       bar,
