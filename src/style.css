@@ -425,7 +425,13 @@ body {
   margin-top: 0.5rem;
   margin-bottom: auto;
   align-items: flex-start;
-  width: min(210px, 52vw);
+  /* Sized to the names it is actually showing rather than to a fixed width.
+     At a fixed 210px most of every row was empty, and the board sat over the
+     run for no reason. Capped so a long name cannot push it across the
+     picture, and floored so short ones do not leave a sliver. */
+  width: fit-content;
+  min-width: 116px;
+  max-width: min(190px, 34vw);
 }
 
 .btn-board-toggle {
@@ -483,6 +489,11 @@ body {
 .leaderboard-column .board-row {
   padding: 0.1rem 0.32rem;
   gap: 0.28rem;
+  /* Nothing may spill past the pill. The gap figure never wraps, so without
+     this the longest row — usually the leader's — painted its text outside its
+     own background. The name truncates instead, which it is already set up to
+     do. */
+  overflow: hidden;
 }
 
 .leaderboard-column .row-place {
@@ -492,6 +503,12 @@ body {
 
 .leaderboard-column .row-name {
   font-size: 0.66rem;
+}
+
+/* The gap figure sits right after the name here rather than being pushed to
+   the far edge, so the row is only as wide as its contents. */
+.leaderboard-column .row-detail {
+  margin-left: 0.1rem;
 }
 
 .leaderboard-column .row-detail {
