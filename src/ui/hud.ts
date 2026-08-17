@@ -42,13 +42,14 @@ export class Hud {
 
   constructor(
     seed: string,
+    cameraLabel: string,
     private readonly callbacks: HudCallbacks,
   ) {
     this.root = el("div", { class: "screen hud-screen" });
-    this.build(seed);
+    this.build(seed, cameraLabel);
   }
 
-  private build(seed: string): void {
+  private build(seed: string, cameraLabel: string): void {
     this.clockNode = el("span", { class: "clock", text: "0.00" });
 
     this.boardNode = el("div", { class: "leaderboard" });
@@ -72,10 +73,12 @@ export class Hud {
 
     this.dockNode = el("div", { class: "board-dock" }, [this.layoutButton, this.boardNode]);
 
+    // Labelled from the camera the world actually opened on, which is the one
+    // chosen last time rather than always the default.
     this.cameraButton = el("button", {
       class: "btn btn-hud",
       type: "button",
-      text: "Broadcast",
+      text: cameraLabel,
     });
     this.cameraButton.addEventListener("click", () => {
       this.cameraButton.textContent = this.callbacks.onCycleCamera();

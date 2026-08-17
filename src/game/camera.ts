@@ -58,6 +58,11 @@ const LOOK_LAG = 1.35;
  */
 const MAX_EYE_SPEED = 260;
 
+/** Whether `value` names a camera mode this build actually has. */
+export function isCameraMode(value: string | null | undefined): value is CameraMode {
+  return value === "broadcast" || value === "chase" || value === "orbit" || value === "wide";
+}
+
 export class BroadcastCamera {
   readonly camera: FreeCamera;
   mode: CameraMode = "broadcast";
@@ -75,7 +80,9 @@ export class BroadcastCamera {
   constructor(
     scene: Scene,
     private readonly geometry: TrackGeometry,
+    initialMode?: CameraMode,
   ) {
+    if (initialMode) this.mode = initialMode;
     this.camera = new FreeCamera("broadcast-cam", this.eye.value.clone(), scene);
     this.camera.minZ = 1;
     this.camera.maxZ = 4000;

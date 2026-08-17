@@ -37,7 +37,7 @@ import {
 } from "../render/textures";
 import { getTheme, type Theme } from "../render/theme";
 import { detectQuality, type QualitySettings } from "./quality";
-import { BroadcastCamera } from "./camera";
+import { BroadcastCamera, type CameraMode } from "./camera";
 import { Race, FIXED_STEP, type RaceEvents } from "./race";
 import { smoothstep } from "./smoothing";
 import type { Player } from "./marble";
@@ -77,6 +77,18 @@ const RETURN_SECONDS = 0.9;
 /** How long the scene may fail to draw before it is treated as stuck. */
 const STUCK_SECONDS = 5;
 
+/** Half the widest part of a support leg, in cm. */
+const SUPPORT_RADIUS = 0.9;
+/** Slack on top of the geometric touching distance, so legs never graze. */
+const SUPPORT_MARGIN = 1.2;
+/**
+ * How many frames either side of a leg count as the deck it is holding up
+ * rather than an obstruction. Comfortably more than the track is wide.
+ */
+const SUPPORT_SELF_SPAN = 40;
+/** A leg has to fall at least this far to be worth drawing. */
+const SUPPORT_MIN_DROP = 6;
+
 /**
  * Test hook letting the basin test build a run without its end wall.
  *
@@ -111,6 +123,8 @@ export interface WorldOptions {
   headless?: boolean;
   /** Visual theme. Purely cosmetic — it cannot change a race's outcome. */
   themeId?: string;
+  /** Camera to open on, so a choice carries between races. */
+  cameraMode?: CameraMode;
   /**
    * Called if the scene is still unable to draw well after it should be able
    * to. See `STUCK_SECONDS`.
@@ -277,7 +291,7 @@ export class World {
     }
 
     // --- Race --------------------------------------------------------------
-    this.camera = new BroadcastCamera(this.scene, this.geometry);
+    this.camera = new BroadcastCamera(this.scene, this.geometry, options.cameraMode);
     // After the camera: the bloom pipeline attaches to it.
     if (!this.headless) this.buildGlow();
     this.race = new Race(
@@ -480,6 +494,12 @@ export class World {
     for (let i = 6; i < this.geometry.frames.length - 6; i += 26) {
       if (this.geometry.isInGap(i)) continue;
       const frame = this.geometry.frames[i];
+      // A leg drops straight down, and the run doubles back beneath itself, so
+      // some of them would otherwise spear a lower stretch of track. Stop the
+      // leg above whatever it would have hit.
+      // Dropped rather than shortened into a stub: legs sit every 26 frames,
+      // so missing one leaves a span the eye reads as ordinary.
+      if (this.legWouldHitTrack(i)) continue;
       // Legs run down to the table the whole run stands on.
       const height = Math.max(2, frame.position.y - tableY);
       const top = frame.position.subtract(frame.up.scale(TRACK_CONSTANTS.shellThickness));
@@ -586,6 +606,40 @@ export class World {
       this.scene,
     );
     if (this.headless) this.decor.push(wall);
+  }
+
+  /**
+   * Whether a leg dropped from `index` would pass through track lower down.
+   *
+   * The run coils back over itself, so a leg dropped from an upper stretch can
+   * spear one below it. A leg is a vertical line, and the track it might hit is
+   * a ribbon of known width, so this is a horizontal distance test against
+   * every frame that sits lower down.
+   *
+   * Frames near the leg's own along-track neighbourhood are skipped: they are
+   * the deck it is holding up, not something in its way.
+   */
+  private legWouldHitTrack(index: number): boolean {
+    const frames = this.geometry.frames;
+    const from = frames[index].position;
+
+    for (let j = 0; j < frames.length; j++) {
+      if (Math.abs(j - index) < SUPPORT_SELF_SPAN) continue;
+      const other = frames[j];
+      // Only what is genuinely underneath, with enough headroom that a leg
+      // stopping here would have been worth drawing at all.
+      if (other.position.y > from.y - SUPPORT_MIN_DROP) continue;
+
+      // Half the channel, its shell, and half the leg — the point at which the
+      // two would touch.
+      const clearance =
+        other.width + TRACK_CONSTANTS.shellThickness + SUPPORT_RADIUS + SUPPORT_MARGIN;
+      const dx = other.position.x - from.x;
+      const dz = other.position.z - from.z;
+      if (dx * dx + dz * dz <= clearance * clearance) return true;
+    }
+
+    return false;
   }
 
   /**

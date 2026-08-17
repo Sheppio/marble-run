@@ -8,12 +8,15 @@ import {
   buildShareLink,
   loadThemeId,
   makePlayers,
+  loadCameraMode,
   paletteFor,
   patternFor,
   readShareLink,
+  saveCameraMode,
 } from "./ui/players";
 import { normaliseSeed, randomSeed } from "./core/seed";
 import { World, initPhysics } from "./game/world";
+import { isCameraMode, type CameraMode } from "./game/camera";
 import type { Standing } from "./game/race";
 
 /**
@@ -34,6 +37,9 @@ let world: World | null = null;
 let roster: string[] = [];
 let seed = "";
 let themeId = "";
+// Carried between races, so a camera picked mid-race is still there for the
+// next one and for the next visit.
+let cameraMode: CameraMode = "broadcast";
 
 function showScreen(screen: Screen | null): void {
   currentScreen?.dispose();
@@ -117,6 +123,7 @@ async function startRace(isRetry = false): Promise<void> {
       seed,
       players: makePlayers(roster),
       themeId,
+      cameraMode,
       onStuck: () => {
         // The scene is running but cannot draw. Rebuilding gets a fresh engine
         // and a fresh set of shaders, which is what a page reload would do and
@@ -151,12 +158,13 @@ async function startRace(isRetry = false): Promise<void> {
   // instrumentation seam through the render loop.
   (window as unknown as { __world?: World }).__world = activeWorld;
 
-  hud = new Hud(seed, {
+  hud = new Hud(seed, activeWorld.camera.modeLabel, {
     onCycleCamera: () => {
       // The label, not the mode id. `cycleMode` returns the internal name, so
       // the button had been relabelling itself "chase" and "wide" in lower
       // case after the first press.
-      activeWorld.camera.cycleMode();
+      cameraMode = activeWorld.camera.cycleMode();
+      saveCameraMode(cameraMode);
       return activeWorld.camera.modeLabel;
     },
   });
@@ -208,6 +216,8 @@ async function boot(): Promise<void> {
   seed = normaliseSeed(shared.seed ?? "");
   roster = shared.names ?? [];
   themeId = loadThemeId() ?? "";
+  const savedCamera = loadCameraMode();
+  if (isCameraMode(savedCamera)) cameraMode = savedCamera;
 
   try {
     await initPhysics();

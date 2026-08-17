@@ -29,6 +29,24 @@ const OBSIDIAN = "#16161c";
 const STORAGE_KEY = "marble-run:roster";
 const THEME_KEY = "marble-run:theme";
 const BOARD_KEY = "marble-run:board";
+const CAMERA_KEY = "marble-run:camera";
+
+/** The camera mode chosen last time, if any. Validated by the camera itself. */
+export function loadCameraMode(): string | null {
+  try {
+    return localStorage.getItem(CAMERA_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function saveCameraMode(mode: string): void {
+  try {
+    localStorage.setItem(CAMERA_KEY, mode);
+  } catch {
+    // Private browsing; the camera just reverts to the default next time.
+  }
+}
 
 /** Where the scoreboard sits: along the bottom, or down the left. */
 export type BoardLayout = "bottom" | "side";
