@@ -21,10 +21,11 @@ import { SpringVector, smoothstep } from "./smoothing";
  * own travel is what stops a tight bend reading as a flick.
  */
 
-export type CameraMode = "broadcast" | "chase" | "orbit" | "wide";
+export type CameraMode = "broadcast" | "reverse" | "chase" | "orbit" | "wide";
 
 const MODE_LABELS: Record<CameraMode, string> = {
   broadcast: "Broadcast",
+  reverse: "Oncoming",
   chase: "Follow",
   orbit: "Orbit",
   wide: "Wide",
@@ -69,9 +70,32 @@ const MAX_EYE_SPEED = 260;
  */
 const BROADCAST_SMOOTH_TIME = 0.85;
 
+/**
+ * How far ahead of the subject, in centreline points, the "oncoming" camera
+ * plants itself. At `POINT_SPACING` = 1.2cm this is about 96cm of runway —
+ * enough that the marble is a small, clearly-approaching shape rather than
+ * already filling the frame the moment the shot cuts to it.
+ */
+const REVERSE_LOOKAHEAD = 80;
+/**
+ * How close the subject may get to the current vantage point before the
+ * camera jumps to a new one further on.
+ *
+ * Not zero: waiting for the marble to reach the exact anchor point would let
+ * it fill the frame and roll past the camera before the cut happens. Jumping
+ * a little early keeps the marble a comfortable distance out.
+ */
+const REVERSE_RETRIGGER = 18;
+
 /** Whether `value` names a camera mode this build actually has. */
 export function isCameraMode(value: string | null | undefined): value is CameraMode {
-  return value === "broadcast" || value === "chase" || value === "orbit" || value === "wide";
+  return (
+    value === "broadcast" ||
+    value === "reverse" ||
+    value === "chase" ||
+    value === "orbit" ||
+    value === "wide"
+  );
 }
 
 export class BroadcastCamera {
@@ -87,6 +111,12 @@ export class BroadcastCamera {
   private lastSubjectId: number | null = null;
   /** Counts down while a hand-off to a new subject is in progress. */
   private handoff = 0;
+  /**
+   * Centreline index the "oncoming" camera is currently planted at. -1 means
+   * none picked yet — the first update in that mode always needs to choose
+   * one anyway, so this doubles as the "just switched into reverse" flag.
+   */
+  private reverseAnchorIndex = -1;
 
   constructor(
     scene: Scene,
@@ -103,7 +133,9 @@ export class BroadcastCamera {
 
   cycleMode(): CameraMode {
     // Ordered from tightest to widest, so cycling pulls steadily back.
-    const order: CameraMode[] = ["broadcast", "chase", "orbit", "wide"];
+    // "reverse" sits right after "broadcast" — the two are a pair, the same
+    // distance from the action but facing opposite ways up the track.
+    const order: CameraMode[] = ["broadcast", "reverse", "chase", "orbit", "wide"];
     this.mode = order[(order.indexOf(this.mode) + 1) % order.length];
     return this.mode;
   }
@@ -138,6 +170,10 @@ export class BroadcastCamera {
     // window: the smoothing slackens right off, then tightens back up.
     if (this.lastSubjectId !== null && subject.player.id !== this.lastSubjectId) {
       this.handoff = HANDOFF_SECONDS;
+      // The anchor was planted relative to whoever the shot was on before —
+      // meaningless once it cuts to someone else, who could be anywhere on
+      // the track. Forces a fresh one relative to the new subject below.
+      this.reverseAnchorIndex = -1;
     }
     this.lastSubjectId = subject.player.id;
     this.handoff = Math.max(0, this.handoff - dt);
@@ -158,6 +194,31 @@ export class BroadcastCamera {
     let smoothTime: number;
 
     switch (this.mode) {
+      case "reverse": {
+        // A vantage point planted further down the track, watching the field
+        // come towards it rather than riding along behind them. The point
+        // itself doesn't move with the subject — it sits still until the
+        // subject gets close, then jumps on to the next one, the way a fixed
+        // camera at the trackside actually works.
+        if (this.reverseAnchorIndex < 0 || index + REVERSE_RETRIGGER >= this.reverseAnchorIndex) {
+          this.reverseAnchorIndex = index + REVERSE_LOOKAHEAD;
+          this.handoff = HANDOFF_SECONDS;
+        }
+        const anchor = this.geometry.frameAt(this.reverseAnchorIndex);
+        // Off to one side and modestly raised, like a trackside camera rather
+        // than one hanging directly over the channel — sitting on the
+        // centreline put the marbles at the very edge of frame instead of
+        // approaching through the middle of it.
+        const lateral = 20 + Math.sin(this.swing) * 8;
+        desiredPosition = anchor.position
+          .add(anchor.right.scale(lateral))
+          .add(anchor.up.scale(16));
+        // Looking back at the subject, not ahead of it — the whole point of
+        // this shot is watching it approach.
+        desiredTarget = subject.position;
+        smoothTime = BROADCAST_SMOOTH_TIME;
+        break;
+      }
       case "orbit":
       case "wide": {
         const shot = ORBIT_SHOTS[this.mode];
