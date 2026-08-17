@@ -407,6 +407,39 @@ body {
   -webkit-backdrop-filter: blur(10px);
 }
 
+/* Holds the board and its layout toggle together, so the button travels with
+   the board rather than sitting somewhere fixed. */
+.board-dock {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+  min-height: 0;
+}
+
+/* Down the left: hard against the top so it uses the height a landscape
+   screen has going spare, and scrollable in case a full field of eighteen is
+   taller than the window. */
+.board-dock-side {
+  margin-top: 0.5rem;
+  margin-bottom: auto;
+  align-items: flex-start;
+  width: min(210px, 52vw);
+}
+
+.btn-board-toggle {
+  pointer-events: auto;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.78rem;
+  line-height: 1;
+  background: rgba(7, 10, 20, 0.6);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
 .leaderboard {
   display: grid;
   grid-auto-flow: column;
@@ -421,6 +454,58 @@ body {
      passed, so width costs nothing there, and spreading the rows out means
      long names fit and the gap figures stop being cramped against them. */
   width: 100%;
+}
+
+/* A single column down the side. Scrolls rather than overflowing when the
+   field is deeper than the window, which landscape makes easy. */
+.leaderboard-column {
+  grid-template-columns: 1fr;
+  width: 100%;
+  overflow-y: auto;
+  min-height: 0;
+  pointer-events: auto;
+  -webkit-overflow-scrolling: touch;
+  gap: 0.15rem;
+}
+
+/* Fades the last row when the field is deeper than the window, so a scrollable
+   list reads as scrollable rather than as one clipped off. Applied only when
+   it actually overflows — otherwise it dims the final row for no reason, which
+   is what happens if the mask is left on unconditionally. */
+.leaderboard-column.is-scrollable {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 1.4rem), transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.4rem), transparent 100%);
+}
+
+/* Tighter than the bottom strip. A full field of eighteen has to fit the
+   height of a landscape window without clipping, and down the side there is no
+   competition for width to spend on padding. */
+.leaderboard-column .board-row {
+  padding: 0.1rem 0.32rem;
+  gap: 0.28rem;
+}
+
+.leaderboard-column .row-place {
+  width: 0.95rem;
+  font-size: 0.62rem;
+}
+
+.leaderboard-column .row-name {
+  font-size: 0.66rem;
+}
+
+.leaderboard-column .row-detail {
+  font-size: 0.56rem;
+}
+
+.leaderboard-column .row-swatch {
+  width: 12px;
+  height: 12px;
+  min-width: 12px;
+}
+
+.leaderboard-column .row-bar {
+  height: 2px;
 }
 
 /* Columns filled top to bottom, so a full field takes a fraction of the

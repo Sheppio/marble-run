@@ -28,6 +28,26 @@ const OBSIDIAN = "#16161c";
 
 const STORAGE_KEY = "marble-run:roster";
 const THEME_KEY = "marble-run:theme";
+const BOARD_KEY = "marble-run:board";
+
+/** Where the scoreboard sits: along the bottom, or down the left. */
+export type BoardLayout = "bottom" | "side";
+
+export function loadBoardLayout(): BoardLayout {
+  try {
+    return localStorage.getItem(BOARD_KEY) === "side" ? "side" : "bottom";
+  } catch {
+    return "bottom";
+  }
+}
+
+export function saveBoardLayout(layout: BoardLayout): void {
+  try {
+    localStorage.setItem(BOARD_KEY, layout);
+  } catch {
+    // Private browsing; the board just reverts to the default next time.
+  }
+}
 
 /** The visual theme chosen last time, if any. */
 export function loadThemeId(): string | null {

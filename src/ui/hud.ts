@@ -1,5 +1,5 @@
 import { clear, el, formatDistance, formatTime } from "./dom";
-import { accentFor } from "./players";
+import { accentFor, loadBoardLayout, saveBoardLayout, type BoardLayout } from "./players";
 import type { Standing } from "../game/race";
 
 /**
@@ -34,6 +34,9 @@ export class Hud {
   private countdownNode!: HTMLElement;
   private cameraButton!: HTMLButtonElement;
   private rows = new Map<number, Row>();
+  private dockNode!: HTMLElement;
+  private layoutButton!: HTMLButtonElement;
+  private layout: BoardLayout = loadBoardLayout();
   /** Field size the board is currently laid out for. */
   private laidOutFor = -1;
 
@@ -49,6 +52,25 @@ export class Hud {
     this.clockNode = el("span", { class: "clock", text: "0.00" });
 
     this.boardNode = el("div", { class: "leaderboard" });
+
+    // Swaps the board between a wide strip along the bottom and a single
+    // column down the left. The column suits a big screen in landscape, where
+    // there is height going spare and the bottom strip would run most of the
+    // way across the picture.
+    this.layoutButton = el("button", {
+      class: "btn btn-board-toggle",
+      type: "button",
+      title: "Move the scoreboard",
+    });
+    this.layoutButton.addEventListener("click", () => {
+      this.layout = this.layout === "bottom" ? "side" : "bottom";
+      saveBoardLayout(this.layout);
+      this.applyLayout();
+      // The column count depends on the layout, so it has to be recomputed.
+      this.laidOutFor = -1;
+    });
+
+    this.dockNode = el("div", { class: "board-dock" }, [this.layoutButton, this.boardNode]);
 
     this.cameraButton = el("button", {
       class: "btn btn-hud",
@@ -74,7 +96,8 @@ export class Hud {
 
     this.countdownNode = el("div", { class: "countdown" });
 
-    this.root.append(topBar, this.boardNode, this.countdownNode);
+    this.root.append(topBar, this.dockNode, this.countdownNode);
+    this.applyLayout();
   }
 
   showCountdown(value: number): void {
@@ -97,6 +120,7 @@ export class Hud {
 
   update(standings: Standing[]): void {
     this.layoutFor(standings.length);
+    this.markScrollable();
 
     for (const standing of standings) {
       const { marble } = standing;
@@ -153,11 +177,36 @@ export class Hud {
    * is four rows rather than twelve. Below five a single column is already
    * short, and splitting it would only cost width for no gain.
    */
+  /**
+   * Flags the side column when it has more rows than fit, which is what turns
+   * the fade at its bottom edge on.
+   */
+  private markScrollable(): void {
+    if (this.layout !== "side") return;
+    const scrollable = this.boardNode.scrollHeight > this.boardNode.clientHeight + 1;
+    this.boardNode.classList.toggle("is-scrollable", scrollable);
+  }
+
+  private applyLayout(): void {
+    const side = this.layout === "side";
+    this.dockNode.classList.toggle("board-dock-side", side);
+    this.boardNode.classList.toggle("leaderboard-column", side);
+    // The arrow points where pressing it will send the board.
+    this.layoutButton.textContent = side ? "▤" : "▥";
+    this.layoutButton.setAttribute(
+      "aria-label",
+      side ? "Move the scoreboard to the bottom" : "Move the scoreboard to the side",
+    );
+    if (!side) this.boardNode.classList.remove("is-scrollable");
+  }
+
   private layoutFor(count: number): void {
     if (count === this.laidOutFor) return;
     this.laidOutFor = count;
 
-    const columns = count >= THREE_COLUMN_FROM ? 3 : count >= TWO_COLUMN_FROM ? 2 : 1;
+    // Down the side it is always one column, however big the field.
+    const columns =
+      this.layout === "side" ? 1 : count >= THREE_COLUMN_FROM ? 3 : count >= TWO_COLUMN_FROM ? 2 : 1;
     this.boardNode.classList.toggle("leaderboard-split", columns > 1);
     this.boardNode.style.setProperty("--board-columns", String(columns));
     // Columns are filled top to bottom, so 1st sits above 2nd rather than
