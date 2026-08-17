@@ -30,6 +30,30 @@ const STORAGE_KEY = "marble-run:roster";
 const THEME_KEY = "marble-run:theme";
 const BOARD_KEY = "marble-run:board";
 const CAMERA_KEY = "marble-run:camera";
+const AUTO_NEXT_KEY = "marble-run:auto-next";
+
+/**
+ * Whether the results screen rolls on to a fresh track by itself.
+ *
+ * Off unless it has been turned on: an unattended app that keeps starting races
+ * is not a reasonable default, but it is exactly what you want with a room full
+ * of people and a phone propped against something.
+ */
+export function loadAutoNext(): boolean {
+  try {
+    return localStorage.getItem(AUTO_NEXT_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
+export function saveAutoNext(on: boolean): void {
+  try {
+    localStorage.setItem(AUTO_NEXT_KEY, on ? "on" : "off");
+  } catch {
+    // Private browsing; the setting just reverts to off next time.
+  }
+}
 
 /** The camera mode chosen last time, if any. Validated by the camera itself. */
 export function loadCameraMode(): string | null {

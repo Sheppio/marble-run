@@ -1,5 +1,5 @@
 import { el, formatTime, ordinal } from "./dom";
-import { accentFor } from "./players";
+import { accentFor, loadAutoNext, saveAutoNext } from "./players";
 import type { Standing } from "../game/race";
 
 /**
@@ -13,8 +13,22 @@ export interface ResultsCallbacks {
   onShare(): Promise<string> | string;
 }
 
+/**
+ * How long the results stay up before auto-advance moves on, in seconds.
+ *
+ * Long enough to read the podium and hear who won, short enough that nobody has
+ * to reach for the phone between races.
+ */
+const AUTO_NEXT_SECONDS = 10;
+
 export class ResultsScreen {
   readonly root: HTMLElement;
+
+  private autoNext = loadAutoNext();
+  private autoRemaining = AUTO_NEXT_SECONDS;
+  private autoTimer: number | null = null;
+  private autoButton: HTMLButtonElement | null = null;
+  private newTrackButton: HTMLButtonElement | null = null;
 
   constructor(
     standings: Standing[],
@@ -23,6 +37,8 @@ export class ResultsScreen {
   ) {
     this.root = el("div", { class: "screen results-screen" });
     this.build(standings, seed);
+    if (this.autoNext) this.startAutoNext();
+    else this.render();
   }
 
   private build(standings: Standing[], seed: string): void {
@@ -97,6 +113,7 @@ export class ResultsScreen {
     // settling an argument about a close finish.
     const newTrack = el("button", { class: "btn btn-primary", type: "button", text: "Next track" });
     newTrack.addEventListener("click", () => this.callbacks.onNewTrack());
+    this.newTrackButton = newTrack;
 
     const rematch = el("button", { class: "btn btn-ghost", type: "button", text: "Same track" });
     rematch.addEventListener("click", () => this.callbacks.onRematch());
@@ -106,6 +123,9 @@ export class ResultsScreen {
 
     const share = el("button", { class: "btn btn-ghost", type: "button", text: "Share result" });
     share.addEventListener("click", async () => {
+      // Sharing takes a moment and often leaves the app entirely, so it is not
+      // something to be interrupted by the next race starting.
+      this.stopAutoNext();
       const original = share.textContent;
       share.textContent = await this.callbacks.onShare();
       window.setTimeout(() => {
@@ -113,15 +133,74 @@ export class ResultsScreen {
       }, 2200);
     });
 
+    // Keeps a session rolling without anyone touching the phone. The countdown
+    // is shown on the button that is about to be pressed rather than as a
+    // separate ticker, so there is only one thing to read and it says what will
+    // happen as well as when.
+    const auto = el("button", {
+      class: "btn btn-ghost btn-auto-next",
+      type: "button",
+      title: `Start a new track ${AUTO_NEXT_SECONDS} seconds after each race`,
+    });
+    auto.addEventListener("click", () => {
+      this.autoNext = !this.autoNext;
+      saveAutoNext(this.autoNext);
+      if (this.autoNext) this.startAutoNext();
+      else this.stopAutoNext();
+    });
+    this.autoButton = auto;
+
     this.root.append(
       header,
       podium,
       el("div", { class: "result-list" }, rows),
-      el("div", { class: "action-row results-actions" }, [newTrack, rematch, changeRacers, share]),
+      el("div", { class: "action-row results-actions" }, [
+        newTrack,
+        rematch,
+        changeRacers,
+        share,
+        auto,
+      ]),
     );
   }
 
+  private startAutoNext(): void {
+    this.stopAutoNext();
+    this.autoNext = true;
+    this.autoRemaining = AUTO_NEXT_SECONDS;
+    this.render();
+    this.autoTimer = window.setInterval(() => {
+      this.autoRemaining -= 1;
+      if (this.autoRemaining <= 0) {
+        this.stopAutoNext();
+        this.callbacks.onNewTrack();
+        return;
+      }
+      this.render();
+    }, 1000);
+  }
+
+  /** Cancels the countdown without changing the saved preference. */
+  private stopAutoNext(): void {
+    if (this.autoTimer !== null) window.clearInterval(this.autoTimer);
+    this.autoTimer = null;
+    this.render();
+  }
+
+  private render(): void {
+    if (this.autoButton) {
+      this.autoButton.textContent = this.autoNext ? "Auto: on" : "Auto: off";
+      this.autoButton.classList.toggle("btn-chip-active", this.autoNext);
+      this.autoButton.setAttribute("aria-pressed", this.autoNext ? "true" : "false");
+    }
+    if (this.newTrackButton) {
+      this.newTrackButton.textContent =
+        this.autoTimer !== null ? `Next track (${this.autoRemaining})` : "Next track";
+    }
+  }
+
   dispose(): void {
+    this.stopAutoNext();
     this.root.remove();
   }
 }

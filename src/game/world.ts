@@ -64,6 +64,26 @@ const CHEQUER_CELL = 1.0;
 type IntroPhase = "none" | "sweep" | "return";
 
 /**
+ * Where the gate stands, in centreline points past the start of the shelf.
+ *
+ * Close enough that the front row only creeps forward to reach it — at 1.2cm
+ * per point, two points puts the bar's face about 1.4cm ahead of the leading
+ * marble's surface, so the grid settles against it without the whole field
+ * sliding out of the shot the camera framed.
+ */
+const GATE_INDEX_OFFSET = 2;
+/**
+ * Height of the drop bar, in cm.
+ *
+ * A marble is 1.6cm across and the bar sits flush with the channel floor, so
+ * this covers one completely: nothing rolls under it, and a marble would have
+ * to be lifted clear of the floor to get over.
+ */
+const GATE_BAR_HEIGHT = 1.8;
+/** How far the bar rises when it opens, in cm. */
+const GATE_LIFT = 5.4;
+
+/**
  * How long the flythrough down the track takes, in seconds.
  *
  * Short on purpose. This runs before every race including rematches on the
@@ -160,6 +180,8 @@ export class World {
   private stuckSettled = false;
   private endWall: PhysicsAggregate | null = null;
   private startGate: Mesh | null = null;
+  private gateBody: PhysicsAggregate | null = null;
+  private gateMaterial: PBRMaterial | null = null;
   private gateOpenAmount = 0;
   private previewProgress = 0;
   private running = false;
@@ -283,11 +305,16 @@ export class World {
     // from the game they are meant to be measuring.
     if (!skipEndWall()) this.buildEndWall();
 
+    // The gate holds the field back until the flag, so it is a collider as well
+    // as scenery and is built in the headless harness too — same reasoning as
+    // the end wall above.
+    this.buildStartGate();
+
     if (!this.headless) {
       this.buildFloor();
-      this.buildStartGate();
       this.buildFinishLine();
       if (this.quality.scenery) this.buildSupports();
+      this.aimShadows();
     }
 
     // --- Race --------------------------------------------------------------
@@ -330,6 +357,14 @@ export class World {
   private hookSimulation(): void {
     this.scene.onBeforePhysicsObservable.add(() => {
       this.race.step();
+      // Pull the barrier out of the simulation the instant the race starts.
+      // Done here, on a physics step, rather than in the render loop, so the
+      // gate opens on the same step in the headless harness as it does on
+      // screen and a seed still reproduces exactly.
+      if (this.gateBody && this.race.state === "racing") {
+        this.gateBody.dispose();
+        this.gateBody = null;
+      }
       this.obstacles.update(Math.max(0, this.race.simTime));
     });
     this.scene.onAfterPhysicsObservable.add(() => {
@@ -345,45 +380,68 @@ export class World {
    * — the first thing anyone saw of a race was a coloured rectangle. Splitting
    * it into a frame you can see the grid through fixes that, and it reads as a
    * piece of apparatus rather than a wall.
+   *
+   * The bar is a real barrier, not a prop. The marbles come alive when the
+   * countdown starts, roll the last centimetre or so down the shelf and settle
+   * against it, so by "GO" the field is packed against the gate the way it is
+   * on an actual marble run — and the flag is the bar lifting out of their way
+   * rather than eighteen marbles being switched on at once.
    */
   private buildStartGate(): void {
-    const frame = this.geometry.frameAt(this.plan.startIndex + 3);
+    const frame = this.geometry.frameAt(GATE_INDEX_OFFSET + this.plan.startIndex);
     const m = Matrix.Identity();
     Matrix.FromXYZAxesToRef(frame.right, frame.up, frame.tangent, m);
     const rotation = Quaternion.FromRotationMatrix(m);
     const span = frame.width * 2.5;
 
-    const material = createSurface(this.scene, "gate-mat", this.theme.decor.gate, {
-      metallic: 0.35,
-      roughness: 0.3,
-      clearCoat: 0.5,
-      glow: this.theme.bloom ? 0.7 : undefined,
-    });
+    if (!this.headless) {
+      const material = createSurface(this.scene, "gate-mat", this.theme.decor.gate, {
+        metallic: 0.35,
+        roughness: 0.3,
+        clearCoat: 0.5,
+        glow: this.theme.bloom ? 0.7 : undefined,
+      });
 
-    for (const side of [-1, 1]) {
-      const upright = CreateCylinder(
-        "gate-post",
-        { diameter: 0.55, height: 7, tessellation: 12 },
-        this.scene,
-      );
-      upright.rotationQuaternion = rotation.clone();
-      upright.position = frame.position
-        .add(frame.right.scale(side * span * 0.5))
-        .add(frame.up.scale(3.2));
-      upright.material = material;
-      upright.isPickable = false;
-      this.decor.push(upright);
+      for (const side of [-1, 1]) {
+        const upright = CreateCylinder(
+          "gate-post",
+          { diameter: 0.55, height: 7, tessellation: 12 },
+          this.scene,
+        );
+        upright.rotationQuaternion = rotation.clone();
+        upright.position = frame.position
+          .add(frame.right.scale(side * span * 0.5))
+          .add(frame.up.scale(3.2));
+        upright.material = material;
+        upright.isPickable = false;
+        this.decor.push(upright);
+      }
+      this.gateMaterial = material;
     }
 
-    // Only the bar moves, so it is the one piece held on the field.
-    const bar = CreateBox("start-gate", { width: span, height: 1.1, depth: 0.45 }, this.scene);
+    // Tall enough to cover a whole marble and set flush with the floor, so
+    // nothing rolls under it or hops over; wider than the channel, so nothing
+    // slips down either side.
+    const bar = CreateBox(
+      "start-gate",
+      { width: span, height: GATE_BAR_HEIGHT, depth: 0.45 },
+      this.scene,
+    );
     bar.rotationQuaternion = rotation.clone();
-    bar.material = material;
+    bar.position = frame.position.add(frame.up.scale(GATE_BAR_HEIGHT / 2));
     bar.isPickable = false;
-    // Purely visual: the marbles are kinematic until the flag drops, so the
-    // gate never has to hold anything back.
+    if (this.gateMaterial) bar.material = this.gateMaterial;
     this.startGate = bar;
     this.decor.push(bar);
+
+    this.gateBody = new PhysicsAggregate(
+      bar,
+      PhysicsShapeType.BOX,
+      // Dead: a marble arriving at the gate should stop against it, not bounce
+      // back into the field waiting behind it.
+      { mass: 0, restitution: 0.02, friction: 0.4 },
+      this.scene,
+    );
   }
 
   private buildFinishLine(): void {
@@ -556,6 +614,36 @@ export class World {
     pipeline.bloomKernel = 48;
     pipeline.bloomScale = 0.5;
     this.glow = pipeline;
+  }
+
+  /**
+   * Parks the shadow frustum over the whole run, once.
+   *
+   * A bounding box around every centreline frame, dropped to take in the legs
+   * and grown by a few channel widths so the walls, obstacles and gantries at
+   * the edge of the run are inside it too.
+   */
+  private aimShadows(): void {
+    const frames = this.geometry.frames;
+    if (!this.lighting || frames.length === 0) return;
+
+    const min = frames[0].position.clone();
+    const max = frames[0].position.clone();
+    for (const frame of frames) {
+      min.minimizeInPlace(frame.position);
+      max.maximizeInPlace(frame.position);
+    }
+    // The legs hang from the deck down to the table, and they cast too.
+    min.y -= TABLE_DROP;
+    max.y += TRACK_CONSTANTS.wallHeight;
+
+    const margin = TRACK_CONSTANTS.baseWidth * 3;
+    min.x -= margin;
+    min.z -= margin;
+    max.x += margin;
+    max.z += margin;
+
+    this.lighting.coverRun(min, max);
   }
 
   /**
@@ -768,10 +856,6 @@ export class World {
 
       this.checkStuck(dt);
       this.animateGate(dt);
-      // The shadow frustum is sized from how far the camera has pulled back, so
-      // a wide shot still gets shadows across everything it can see.
-      const look = this.camera.camera.getTarget();
-      this.lighting?.followShadows(look, Vector3.Distance(this.camera.camera.position, look));
       onFrame?.(dt);
       this.scene.render();
     });
@@ -820,15 +904,23 @@ export class World {
     this.canvasObserver.observe(canvas);
   }
 
+  /**
+   * Lifts the bar once the flag has dropped.
+   *
+   * Purely visual — the collider is already gone by the time this runs, so how
+   * fast the bar travels cannot affect the race. Quick, because the marbles are
+   * pressed against it and a bar that lingers looks like it is being dragged
+   * through them.
+   */
   private animateGate(dt: number): void {
     if (!this.startGate) return;
     const wantOpen = this.race.state === "racing" || this.race.state === "finished";
     const target = wantOpen ? 1 : 0;
     if (Math.abs(this.gateOpenAmount - target) < 0.001) return;
-    this.gateOpenAmount += (target - this.gateOpenAmount) * Math.min(1, dt * 5);
-    const frame = this.geometry.frameAt(this.plan.startIndex + 3);
+    this.gateOpenAmount += (target - this.gateOpenAmount) * Math.min(1, dt * 9);
+    const frame = this.geometry.frameAt(GATE_INDEX_OFFSET + this.plan.startIndex);
     this.startGate.position = frame.position.add(
-      frame.up.scale(1.4 + this.gateOpenAmount * 5.4),
+      frame.up.scale(GATE_BAR_HEIGHT / 2 + this.gateOpenAmount * GATE_LIFT),
     );
   }
 
@@ -850,6 +942,8 @@ export class World {
     this.engine.stopRenderLoop();
     this.race.dispose();
     this.endWall?.dispose();
+    this.gateBody?.dispose();
+    this.gateBody = null;
     this.glow?.dispose();
     for (const maps of this.textures) {
       maps.albedo.dispose();

@@ -174,9 +174,12 @@ function raw(scene: Scene, name: string, data: Uint8Array, size: number): RawTex
 export function woodDetail(scene: Scene): DetailMaps {
   return bake(scene, "wood", DETAIL_SIZE, (u, v) => {
     // Boards run the length of the run, so the seams between them are lines of
-    // constant U. Sixteen across a tile puts a seam roughly every marble width,
-    // which is about right against a channel this size.
-    const boards = 16;
+    // constant U. Seven across a 16cm tile makes each board about 2.3cm, which
+    // puts roughly three of them across a standard 7.2cm channel floor.
+    //
+    // Sixteen was the first attempt and far too fine: a board narrower than a
+    // marble reads as corduroy rather than as floorboards.
+    const boards = 7;
     const along = u * boards;
     const board = Math.floor(along);
     const across = along - board;

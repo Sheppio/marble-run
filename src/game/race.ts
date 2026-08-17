@@ -207,11 +207,24 @@ export class Race {
 
   }
 
+  /**
+   * Starts the countdown, and lets the marbles go.
+   *
+   * They are released here rather than at "GO" because the start gate is a real
+   * barrier: given the countdown to do it in, the field rolls the last
+   * centimetre down the shelf and settles against the bar, nudging into a pack
+   * the way marbles actually do. The flag is then the gate being taken away,
+   * not the marbles being switched on.
+   *
+   * Nothing is gained on the track by being let go early — the gate is still
+   * shut — so this does not change who wins.
+   */
   beginCountdown(seconds = 3): void {
     this.state = "countdown";
     this.countdownRemaining = seconds;
     this.lastCountdownAnnounced = seconds + 1;
     this.simTime = -seconds;
+    for (const marble of this.marbles) marble.release();
   }
 
   /** Skips straight to the flag — used by the "skip to result" button. */
@@ -235,10 +248,16 @@ export class Race {
         this.lastCountdownAnnounced = whole;
         this.events.onCountdownTick?.(Math.max(0, whole));
       }
+      // The field is live and rolling into the gate, so it needs its rolling
+      // resistance during the countdown too — without it, marbles arrive at the
+      // barrier faster than they ever travel on the track and rattle instead of
+      // settling. Force zones are left off: they exist to shape the racing, and
+      // the race has not started.
+      for (const marble of this.marbles) this.applyResistance(marble);
+
       if (this.countdownRemaining <= 0) {
         this.state = "racing";
         this.simTime = 0;
-        for (const marble of this.marbles) marble.release();
         this.events.onStart?.();
       }
       return;

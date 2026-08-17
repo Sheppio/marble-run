@@ -39,14 +39,14 @@ export const DEFAULT_SKY: SkyPalette = {
 };
 
 /**
- * Half-width of the shadow frustum, in cm.
+ * Half-width the shadow frustum starts at, in cm, before the run is measured.
  *
- * Wide enough to hold the run and its legs at the distance the broadcast camera
- * sits, narrow enough to keep the shadow map dense.
+ * Only ever used for the frame or two between the light being created and the
+ * track handing over its actual bounds.
  */
 const SHADOW_EXTENT = 110;
-/** Widest the shadow frustum will open, however far the camera pulls back. */
-const SHADOW_MAX_EXTENT = 420;
+/** Never open the frustum tighter than this, however small the run. */
+const SHADOW_MIN_EXTENT = 60;
 
 /** Direction the key light comes from. */
 const SUN_DIRECTION = new Vector3(-0.45, -1, 0.35).normalize();
@@ -185,13 +185,11 @@ export interface WorldLighting {
   shadowGenerator: ShadowGenerator | null;
   sun: DirectionalLight;
   skybox: Mesh;
-  /** Keeps the shadow map centred on the action. */
   /**
-   * Keeps the shadow map centred on the action and opened wide enough to cover
-   * what the camera can see. `viewRadius` is how far the camera is from what it
-   * is looking at.
+   * Parks the shadow frustum over the whole run, once. `min` and `max` are a
+   * world-space bounding box around everything that should cast.
    */
-  followShadows(target: Vector3, viewRadius?: number): void;
+  coverRun(min: Vector3, max: Vector3): void;
   dispose(): void;
 }
 
@@ -232,11 +230,10 @@ export function createEnvironment(
   const sun = new DirectionalLight("sun", SUN_DIRECTION.clone(), scene);
   sun.intensity = options.sunIntensity;
   sun.diffuse = palette.sun;
-  // Fixed extents, sized to the stretch of run the camera can see rather than
-  // to the whole track. Left to fit the scene automatically the frustum has to
-  // span the entire run plus the ground plane, which spreads even a 2048 map so
-  // thin that the shadow is a shapeless blur. Pinned to the action and followed
-  // each frame, the same map resolves the channel and its legs.
+  // Fixed extents, set once from the run's own bounds — see `coverRun`.
+  // Babylon's automatic fit would size the frustum to the whole scene, and the
+  // scene includes a ground plane many times the size of the track, which
+  // spreads even a 2048 map so thin that the shadow becomes a shapeless blur.
   sun.autoUpdateExtends = false;
   sun.orthoLeft = -SHADOW_EXTENT;
   sun.orthoRight = SHADOW_EXTENT;
@@ -279,20 +276,76 @@ export function createEnvironment(
     shadowGenerator,
     sun,
     skybox,
-    followShadows(target: Vector3, viewRadius = SHADOW_EXTENT) {
-      // Open the frustum to roughly what the camera can see, rather than
-      // holding it at one size. Fixed, it was tight enough to be sharp behind
-      // the broadcast camera and far too small for the wide shots, where most
-      // of the run fell outside it and simply stopped casting.
-      const extent = Math.min(SHADOW_MAX_EXTENT, Math.max(SHADOW_EXTENT, viewRadius));
-      sun.orthoLeft = -extent;
-      sun.orthoRight = extent;
-      sun.orthoBottom = -extent;
-      sun.orthoTop = extent;
-      sun.shadowMaxZ = extent * 3.2;
-      // Park the light just up-sun of whatever we're watching, far enough back
-      // that the run is inside the near plane at any of these sizes.
-      sun.position.copyFrom(target.subtract(SUN_DIRECTION.scale(extent * 1.5)));
+    coverRun(min: Vector3, max: Vector3) {
+      // Set once, and then left alone for the rest of the race.
+      //
+      // This used to follow the camera, resized each frame to roughly what the
+      // camera could see. That kept the map dense, but it meant the set of
+      // things casting a shadow changed as the camera moved: track outside the
+      // frustum cast nothing, and the moment it crossed the boundary it started
+      // to. Following a marble down the run, the effect was a shadow being
+      // painted onto the ground just ahead of the camera, over and over, for
+      // the length of the track.
+      //
+      // A frustum big enough for the whole run has no boundary to cross, so
+      // every part of it casts from the first frame to the last. The cost is
+      // resolution, and a run is 5-7 metres across its footprint, so the fit
+      // has to be a tight one.
+      //
+      // Hence the box rather than a bounding sphere. The frustum is
+      // axis-aligned in *light* space, not world space, so the honest way to
+      // fit it is to put the run's eight corners into light space and take
+      // their extents there. A sphere avoids needing that basis but pays for it
+      // everywhere: on a typical run it came out about a third wider than the
+      // box on both axes, which is a third of the shadow's sharpness given away
+      // for nothing.
+      const centre = min.add(max).scale(0.5);
+      const span = max.subtract(min).length();
+      // Babylon builds the light's view matrix with LookAtLH and world up, so
+      // the basis has to be derived the same way or the extents are fitted to
+      // the wrong axes.
+      const forward = SUN_DIRECTION;
+      const right = Vector3.Cross(Vector3.Up(), forward).normalize();
+      const up = Vector3.Cross(forward, right).normalize();
+
+      // Far enough up-sun that the whole run sits in front of the near plane
+      // whichever way it happens to lie.
+      const eye = centre.subtract(forward.scale(span));
+      sun.position.copyFrom(eye);
+
+      let left = Infinity;
+      let bottom = Infinity;
+      let rightMost = -Infinity;
+      let top = -Infinity;
+      let near = Infinity;
+      let far = -Infinity;
+      for (let corner = 0; corner < 8; corner++) {
+        const point = new Vector3(
+          corner & 1 ? max.x : min.x,
+          corner & 2 ? max.y : min.y,
+          corner & 4 ? max.z : min.z,
+        ).subtractInPlace(eye);
+        const x = Vector3.Dot(point, right);
+        const y = Vector3.Dot(point, up);
+        const z = Vector3.Dot(point, forward);
+        left = Math.min(left, x);
+        rightMost = Math.max(rightMost, x);
+        bottom = Math.min(bottom, y);
+        top = Math.max(top, y);
+        near = Math.min(near, z);
+        far = Math.max(far, z);
+      }
+
+      // Babylon's frustum-edge falloff is measured from the centre of the
+      // frustum, so a run sitting hard against one edge would have its shadows
+      // faded. A little slack keeps everything clear of the boundary.
+      const pad = Math.max(SHADOW_MIN_EXTENT * 0.15, span * 0.03);
+      sun.orthoLeft = Math.min(-SHADOW_MIN_EXTENT, left - pad);
+      sun.orthoRight = Math.max(SHADOW_MIN_EXTENT, rightMost + pad);
+      sun.orthoBottom = Math.min(-SHADOW_MIN_EXTENT, bottom - pad);
+      sun.orthoTop = Math.max(SHADOW_MIN_EXTENT, top + pad);
+      sun.shadowMinZ = Math.max(1, near - pad);
+      sun.shadowMaxZ = far + pad;
     },
     dispose() {
       shadowGenerator?.dispose();
