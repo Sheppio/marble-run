@@ -482,8 +482,9 @@ export class World {
 
     // Tall enough to cover a whole marble and set flush with the floor, so
     // nothing rolls under it or hops over; wider than the channel, so nothing
-    // slips down either side. Carries the collider and, on the upstream face
-    // the countdown camera actually looks at, the banner too.
+    // slips down either side. Carries the collider only — see below for why
+    // the visible banner lives on two separate planes rather than on this
+    // mesh's own faces.
     const bar = CreateBox(
       "start-gate",
       { width: span, height: GATE_BAR_HEIGHT, depth: 0.45 },
@@ -492,21 +493,42 @@ export class World {
     bar.rotationQuaternion = rotation.clone();
     bar.position = frame.position.add(frame.up.scale(GATE_BAR_HEIGHT / 2));
     bar.isPickable = false;
-    if (!this.headless) bar.material = this.startGateMaterial(span, GATE_BAR_HEIGHT);
+    if (!this.headless) {
+      // Plain, not the banner: a box's two large faces share one texture
+      // through opposite halves of its default UV, so putting the banner
+      // here as well as on the planes below left one of the two nearly
+      // coplanar with this mesh's own (partly mirrored) face, and they
+      // z-fought — both rendered at once, tearing between them frame to
+      // frame.
+      bar.material = createSurface(this.scene, "gate-bar-core", this.theme.decor.gate, {
+        metallic: 0.1,
+        roughness: 0.4,
+      });
+    }
     this.startGate = bar;
     this.decor.push(bar);
 
-    // A box's two large faces share one texture through opposite halves of
-    // its default UV, so a word that reads correctly from one side reads
-    // backwards from the other — invisible as long as only one side is ever
-    // in shot, which stopped being true once the "oncoming" camera started
-    // planting itself past the gate and looking back at it. Rather than fight
-    // that UV relationship, the downstream face gets its own plane, mounted a
-    // hair proud of the box so it — not the box's own mirrored face — is what
-    // a camera on that side actually sees, drawn from a second, independently
-    // correct copy of the same texture.
+    // The banner itself, on two independent planes rather than on the box's
+    // own faces. A box's two large faces share one texture through opposite
+    // halves of its default UV, so a word that reads correctly from one side
+    // reads backwards from the other — invisible as long as only one side was
+    // ever in shot, which stopped being true once the "oncoming" camera
+    // started planting itself past the gate and looking back at it. Two
+    // planes, each with its own independently correct copy of the texture,
+    // sidesteps that UV relationship entirely instead of fighting it.
     if (!this.headless) {
-      const faceGap = 0.25;
+      const faceGap = 0.3;
+      const upstream = CreatePlane(
+        "start-gate-upstream",
+        { width: span, height: GATE_BAR_HEIGHT },
+        this.scene,
+      );
+      upstream.rotationQuaternion = rotation.clone();
+      upstream.position = bar.position.subtract(frame.tangent.scale(faceGap));
+      upstream.material = this.startGateMaterial(span, GATE_BAR_HEIGHT);
+      upstream.isPickable = false;
+      this.decor.push(upstream);
+
       const downstream = CreatePlane(
         "start-gate-downstream",
         { width: span, height: GATE_BAR_HEIGHT },
