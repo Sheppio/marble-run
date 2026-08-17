@@ -90,7 +90,15 @@ function showSetup(): void {
   );
 }
 
-async function startRace(): Promise<void> {
+/**
+ * Whether the current race is already a retry after a scene that could not
+ * draw. One automatic attempt, then the player is told rather than left in a
+ * loop of rebuilds.
+ */
+let retriedStuck = false;
+
+async function startRace(isRetry = false): Promise<void> {
+  retriedStuck = isRetry;
   showLoader("Building the track…");
   disposeWorld();
 
@@ -109,6 +117,20 @@ async function startRace(): Promise<void> {
       seed,
       players: makePlayers(roster),
       themeId,
+      onStuck: () => {
+        // The scene is running but cannot draw. Rebuilding gets a fresh engine
+        // and a fresh set of shaders, which is what a page reload would do and
+        // saves the player doing it by hand.
+        console.warn("Scene failed to render; rebuilding.");
+        if (retriedStuck) {
+          showFatal(
+            "Graphics did not start",
+            "The scene could not be drawn on this device. Reloading the page usually clears it.",
+          );
+          return;
+        }
+        void startRace(true);
+      },
       events: {
         onCountdownTick: (value) => hud?.showCountdown(value),
         onRaceComplete,

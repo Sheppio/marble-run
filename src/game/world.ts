@@ -74,6 +74,9 @@ const SWEEP_SECONDS = 1.8;
 /** How long the camera takes to come back to the grid afterwards. */
 const RETURN_SECONDS = 0.9;
 
+/** How long the scene may fail to draw before it is treated as stuck. */
+const STUCK_SECONDS = 5;
+
 /**
  * Test hook letting the basin test build a run without its end wall.
  *
@@ -108,6 +111,11 @@ export interface WorldOptions {
   headless?: boolean;
   /** Visual theme. Purely cosmetic — it cannot change a race's outcome. */
   themeId?: string;
+  /**
+   * Called if the scene is still unable to draw well after it should be able
+   * to. See `STUCK_SECONDS`.
+   */
+  onStuck?: () => void;
   /** Tuning knobs — omit both outside the diagnostic harness. */
   disableObstacles?: boolean;
   maxSpeed?: number;
@@ -133,6 +141,9 @@ export class World {
   private readonly extraTextures: RawTexture[] = [];
   private glow: DefaultRenderingPipeline | null = null;
   private canvasObserver: ResizeObserver | null = null;
+  private readonly onStuck: (() => void) | undefined;
+  private stuckElapsed = 0;
+  private stuckSettled = false;
   private endWall: PhysicsAggregate | null = null;
   private startGate: Mesh | null = null;
   private gateOpenAmount = 0;
@@ -151,6 +162,7 @@ export class World {
     }
 
     this.headless = options.headless ?? false;
+    this.onStuck = options.onStuck;
     this.quality = detectQuality();
 
     this.engine = this.headless
@@ -175,7 +187,23 @@ export class World {
           stencil: false,
           alpha: false,
         });
-    if (!this.headless) this.engine.setHardwareScalingLevel(this.quality.hardwareScaling);
+    if (!this.headless) {
+      this.engine.setHardwareScalingLevel(this.quality.hardwareScaling);
+      // Compile shaders synchronously rather than polling the driver for
+      // completion.
+      //
+      // With KHR_parallel_shader_compile, Babylon holds a material unready
+      // until the driver reports COMPLETION_STATUS_KHR, and on a number of
+      // mobile GPUs that status never arrives. Every material stays unready,
+      // every mesh is skipped, and the result is an empty canvas under a
+      // perfectly working UI for the whole page — which is why reloading
+      // sometimes clears it and sometimes has to be done several times.
+      //
+      // The extension only buys a little first-frame latency across the dozen
+      // or so materials here. That is a cheap price for removing a failure
+      // that makes the app unusable until it happens to load cleanly.
+      this.engine.getCaps().parallelShaderCompile = undefined;
+    }
 
     this.scene = new Scene(this.engine);
     this.scene.clearColor = new Color4(0.05, 0.07, 0.13, 1);
@@ -684,6 +712,7 @@ export class World {
         this.camera.update(this.race, dt);
       }
 
+      this.checkStuck(dt);
       this.animateGate(dt);
       this.lighting?.followShadows(this.camera.camera.getTarget());
       onFrame?.(dt);
@@ -699,6 +728,32 @@ export class World {
     this.observeCanvasSize();
     window.addEventListener("resize", this.handleResize);
     window.visualViewport?.addEventListener("resize", this.handleResize);
+  }
+
+  /**
+   * Watches for a scene that is running but cannot draw.
+   *
+   * The track is the one mesh guaranteed to be in shot for the whole race, so
+   * its readiness stands in for the scene's. In a healthy build it reports
+   * ready about 170ms after the world is created; five seconds is thirty times
+   * that, far enough clear to never fire on a slow phone merely having a bad
+   * moment.
+   *
+   * This exists because the failure it catches is silent — frames are drawn,
+   * the loop is running, the UI is fine, and nothing appears. Recovering
+   * automatically is worth it even without knowing the cause, since the
+   * alternative a player has is reloading until it happens to work.
+   */
+  private checkStuck(dt: number): void {
+    if (this.stuckSettled) return;
+    this.stuckElapsed += dt;
+    if (this.trackMeshes.shell.isReady(true)) {
+      this.stuckSettled = true;
+      return;
+    }
+    if (this.stuckElapsed < STUCK_SECONDS) return;
+    this.stuckSettled = true;
+    this.onStuck?.();
   }
 
   private observeCanvasSize(): void {
