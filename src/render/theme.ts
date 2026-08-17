@@ -81,33 +81,35 @@ const WORKSHOP: Theme = {
   // off the run.
   ground: Color3.FromHexString("#22371c"),
   track(seedValue) {
-    // Walnut through oak to beech — a workshop, not a paint shop.
+    // Honey maple, the colour a bowling lane is, with only enough variation
+    // between seeds to stop every track looking stamped from one mould.
     //
-    // These values are deliberately dark. Albedo is not what you see: the
+    // Still darker than it looks it should be. Albedo is not what you see: the
     // surface is lit by a sun at 2.8 and a full share of a bright sky, which
     // lifts it several stops. An earlier pass picked mid-browns here and every
     // track rendered as flat cream.
-    const hue = 20 + (seedValue % 26);
-    const saturation = 0.78 + ((seedValue >> 8) % 12) / 100;
+    const hue = 30 + (seedValue % 14);
+    const saturation = 0.52 + ((seedValue >> 8) % 10) / 100;
     return {
-      floor: hsv(hue, saturation, 0.14),
+      floor: hsv(hue, saturation, 0.34),
       // The walls are the part you read the shape of the run from, so they sit
-      // a clear step lighter than the floor rather than a subtle one.
-      wall: hsv(hue, saturation * 0.85, 0.26),
+      // a clear step darker than the lane rather than a subtle one.
+      wall: hsv(hue, saturation * 1.1, 0.19),
       underside: hsv(hue, saturation, 0.05),
-      // Darker than the floor, not lighter: it reads as the joint between two
-      // planks, which is what a run built out of timber would actually have.
-      // A pale band over the grain looked like a spill of light on the deck.
-      stripe: hsv(hue - 4, saturation, 0.055),
+      // Darker than the lane, not lighter: it reads as a joint across the
+      // boards. A pale band over the grain looked like a spill of light.
+      stripe: hsv(hue - 4, saturation, 0.1),
     };
   },
   trackSurface: {
     metallic: 0.0,
-    roughness: 0.58,
-    // Light varnish only. A strong clear coat washes the palette out into a
-    // flat cream, which is what an earlier pass looked like.
-    clearCoat: 0.18,
-    environmentIntensity: 0.4,
+    // Polished. A lane is under a thick coat of lacquer, and that sheen down
+    // the length of it is most of why it reads as a lane rather than as bare
+    // board. The clear coat has to stay well under 1 all the same: at full
+    // strength it washes the palette out into a flat cream.
+    roughness: 0.3,
+    clearCoat: 0.5,
+    environmentIntensity: 0.5,
   },
   material: "wood",
   decor: {

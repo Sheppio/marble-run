@@ -413,9 +413,21 @@ export function buildObstacles(
           // straights, where the banking is not already pressing marbles into
           // the wall it grows from.
           const reach = Math.max(1.0, Math.min(f.width * reachFactor, f.width * 2 - MIN_CLEAR_LANE));
+          // The baffle is built longer than its reach and pushed out by the
+          // difference, so its root is buried in the wall and its tip lands
+          // exactly where the reach says it should.
+          //
+          // Flush with the inner face of the wall was not enough: the sweep
+          // rotates the baffle about its own centre, which swings the root
+          // inward and leaves the whole upstream corner standing proud of the
+          // wall in plain sight. Burying it is what hides that corner.
+          //
+          // Held under the shell thickness so the root stops inside the wall
+          // rather than breaking out of the far side of it.
+          const embed = Math.min(TRACK_CONSTANTS.shellThickness * 0.85, 1.0);
           const baffle = CreateBox(
             "baffle",
-            { width: reach, height, depth: thickness },
+            { width: reach + embed, height, depth: thickness },
             scene,
           );
           // Angled to present a guiding face to oncoming marbles. The lean is
@@ -427,7 +439,7 @@ export function buildObstacles(
             side * lean,
           ).multiply(frameRotation(f));
           baffle.position = f.position
-            .add(f.right.scale(side * (f.width - reach / 2)))
+            .add(f.right.scale(side * (f.width - reach / 2 + embed / 2)))
             .add(f.up.scale(height / 2));
           parts.push(baffle);
         }

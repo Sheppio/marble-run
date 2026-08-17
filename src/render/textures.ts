@@ -160,31 +160,49 @@ function raw(scene: Scene, name: string, data: Uint8Array, size: number): RawTex
 // --- Surfaces --------------------------------------------------------------
 
 /**
- * Varnished timber.
+ * A lacquered maple lane, like a bowling alley floor.
  *
- * Grain runs along V, which the track's UVs lay out down the length of the
- * run, so the boards read as boards rather than as a pattern stuck on them. The
- * lines are a warped sine rather than noise alone: real grain is banded, and
- * pure noise reads as dirt.
+ * Narrow boards laid along the run with dark seams between them, each cut from
+ * a different part of the log so it carries its own tone and its own grain
+ * offset. The grain within a board is close, straight and only slightly warped:
+ * a lane is quarter sawn and sanded flat, which is a quite different surface
+ * from the wandering rings of a flat-sawn plank.
+ *
+ * The boards run along V, which the track's UVs lay down the length of the run,
+ * so they read as strips laid end to end rather than as a pattern stuck on top.
  */
 export function woodDetail(scene: Scene): DetailMaps {
   return bake(scene, "wood", DETAIL_SIZE, (u, v) => {
-    // Warp the coordinate before banding it, which is what turns concentric
-    // rings into the wandering lines you get from a flat-sawn board.
-    const warp = fbm(u, v, 3, 4) * 0.8 + fbm(u, v, 11, 3) * 0.18;
-    const rings = Math.sin((u * 6 + warp * 5) * Math.PI * 2) * 0.5 + 0.5;
-    const grain = Math.pow(rings, 1.7);
+    // Boards run the length of the run, so the seams between them are lines of
+    // constant U. Sixteen across a tile puts a seam roughly every marble width,
+    // which is about right against a channel this size.
+    const boards = 16;
+    const along = u * boards;
+    const board = Math.floor(along);
+    const across = along - board;
 
-    // Fine lengthwise fibres over the top of the banding.
-    const fibre = fbm(u * 4, v * 0.35, 26, 2);
+    // Each board is cut from a different part of the log, so its grain is
+    // offset and its tone shifted. Without this the lane reads as one printed
+    // sheet rather than as strips laid side by side.
+    const shift = hash2(board, 3.1);
+    const boardTone = (hash2(board, 7.7) - 0.5) * 0.16;
 
-    // Relief is allowed a wide range because it only tilts the normal; colour
-    // is kept to a narrow band around mid-grey. Tuned by eye from renders: a
-    // wide colour range gave sharply banded zebra stripes rather than timber,
-    // since the vertex colours it multiplies are already carrying the contrast
-    // between floor, wall and stripe.
-    const height = grain * 0.6 + fibre * 0.4;
-    const shade = 0.76 + grain * 0.2 + fibre * 0.1;
+    // Fine grain running lengthwise, barely warped. A bowling lane is quarter
+    // sawn and sanded flat, so the lines are close, straight and even — quite
+    // unlike the wandering rings of a flat-sawn board, which is what this
+    // texture used to draw.
+    const warp = fbm(u * 3, v * 0.5, 9, 3) * 0.25;
+    const grain = Math.abs(Math.sin((across * 7 + shift * 12 + warp) * Math.PI));
+    const fibre = fbm(u * 6, v * 0.3, 40, 2);
+
+    // The seam itself: a dark line where two boards meet.
+    const seam = Math.min(across, 1 - across);
+    const inSeam = 1 - smoothstep(Math.min(1, seam / 0.035));
+
+    // Relief is almost flat — the surface is lacquered — except at the seams,
+    // which are the only thing that catches the light.
+    const height = inSeam * 0.9 + grain * 0.06 + fibre * 0.04;
+    const shade = 0.86 + boardTone + grain * 0.07 + fibre * 0.05 - inSeam * 0.5;
     return { height, shade };
   });
 }
