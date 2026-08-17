@@ -362,11 +362,26 @@ body {
   flex-direction: column;
 }
 
+/* Three columns rather than space-between, with the outer two sharing the
+   spare width equally. The camera button then sits at the centre of the screen
+   whatever the seed and clock either side of it are doing.
+   With space-between, any width change in either neighbour moved the button by
+   half of it — and the clock's last digits change every frame, so the button
+   jittered continuously. Centring it by grid makes that structurally
+   impossible rather than relying on the digits being equal width. */
 .hud-top {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 0.5rem;
+}
+
+.hud-top > :first-child {
+  justify-self: start;
+}
+
+.hud-top > :last-child {
+  justify-self: end;
 }
 
 .hud-seed {
@@ -395,7 +410,11 @@ body {
 }
 
 .clock {
+  /* Equal-width digits where the font has them, and a floor wide enough for
+     the usual mm.ss so the box does not pulse where it does not. */
   font-variant-numeric: tabular-nums;
+  min-width: 5ch;
+  text-align: center;
   font-size: 1.4rem;
   font-weight: 800;
   letter-spacing: -0.02em;
