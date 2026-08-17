@@ -2,6 +2,7 @@ import { Constants } from "@babylonjs/core/Engines/constants";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { RawTexture } from "@babylonjs/core/Materials/Textures/rawTexture";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
+import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
 import type { Scene } from "@babylonjs/core/scene";
 
 /**
@@ -454,4 +455,98 @@ export function fitChequer(
     texture.uScale = columns;
     texture.vScale = rows;
   }
+}
+
+/**
+ * "START" on a diagonal racing-stripe banner, for the crossbar of the start
+ * gate.
+ *
+ * The gate used to wear the same chequered flag as the finish, which reads
+ * wrong at that end of the track — chequer means "the race is over" wherever
+ * it appears on a real course, not "line up here". This says what it is
+ * instead: bold text over the diagonal stripes a rally start banner actually
+ * uses, in the theme's own gate colour so it still belongs to the rest of the
+ * apparatus.
+ *
+ * The word sits in the top portion rather than centred on the bar. The bar
+ * itself is now taller than the field waiting against it — see
+ * `GATE_BAR_HEIGHT` in world.ts — precisely so the grid's own heads cover only
+ * the lower part of it and the word stays clear above them.
+ *
+ * Drawn on a real 2D canvas rather than baked pixel by pixel like the rest of
+ * this file's textures — those are all repeating surface detail with no
+ * layout to speak of, where a formula is simpler than an image. Text has
+ * glyphs, and a canvas already knows how to set them.
+ */
+export function startBannerTexture(
+  scene: Scene,
+  faceWidth: number,
+  faceHeight: number,
+  accent: Color3,
+): DynamicTexture {
+  const height = 256;
+  // Sized to the face's own proportions rather than a fixed square, or the
+  // banner's aspect ratio would fight the mesh's and either the stripes or
+  // the text would come out stretched. Capped well under the platform's
+  // texture size ceiling even at the widest gate this ever draws for.
+  const width = Math.max(256, Math.min(2048, Math.round((height * faceWidth) / faceHeight)));
+
+  const texture = new DynamicTexture("start-banner", { width, height }, scene, true);
+  texture.wrapU = Texture.CLAMP_ADDRESSMODE;
+  texture.wrapV = Texture.CLAMP_ADDRESSMODE;
+  texture.hasAlpha = false;
+
+  const ctx = texture.getContext() as CanvasRenderingContext2D;
+  const dark = accent.scale(0.55);
+  const light = new Color3();
+  accent.scale(1.25).clampToRef(0, 1, light);
+
+  // Diagonal stripes, alternating the theme's gate colour with white — the
+  // same device an actual start banner uses so the eye reads "line forms
+  // here" before it reads the word.
+  const stripe = height * 0.62;
+  ctx.save();
+  ctx.fillStyle = "#f4f4f4";
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = dark.toHexString();
+  const diagonal = Math.max(width, height) * 2;
+  for (let x = -diagonal; x < diagonal; x += stripe * 2) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x + stripe, 0);
+    ctx.lineTo(x + stripe - height, height);
+    ctx.lineTo(x - height, height);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // Text sits in the top third of the bar, clear of where the queued field's
+  // own heads reach — see the function comment above.
+  const textY = height * 0.28;
+
+  // A soft highlight behind the text, so it sits on its own patch of light
+  // rather than straddling a stripe seam wherever the layout happens to land.
+  const gradient = ctx.createRadialGradient(width / 2, textY, 0, width / 2, textY, width * 0.3);
+  gradient.addColorStop(0, "rgba(255,255,255,0.85)");
+  gradient.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `900 ${Math.round(height * 0.34)}px Arial, sans-serif`;
+  ctx.lineJoin = "round";
+  ctx.lineWidth = height * 0.055;
+  ctx.strokeStyle = "#1a1a1a";
+  ctx.strokeText("START", width / 2, textY);
+  ctx.fillStyle = light.toHexString();
+  ctx.fillText("START", width / 2, textY);
+
+  // DynamicTexture's canvas has row 0 at the top, but a texture's V=0 is
+  // conventionally its bottom — `update()` inverts on upload by default to
+  // reconcile the two. An earlier version passed `false` here and turned the
+  // banner upside down; leaving the argument off takes the default.
+  texture.update();
+  return texture;
 }

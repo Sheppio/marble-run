@@ -5,7 +5,7 @@ import { Scene } from "@babylonjs/core/scene";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
-import type { RawTexture } from "@babylonjs/core/Materials/Textures/rawTexture";
+import type { BaseTexture } from "@babylonjs/core/Materials/Textures/baseTexture";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
 import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder";
@@ -32,6 +32,7 @@ import {
   grassDetail,
   panelDetail,
   plasticDetail,
+  startBannerTexture,
   woodDetail,
   type DetailMaps,
 } from "../render/textures";
@@ -76,10 +77,13 @@ const GATE_INDEX_OFFSET = 2;
  * Height of the drop bar, in cm.
  *
  * A marble is 1.6cm across and the bar sits flush with the channel floor, so
- * this covers one completely: nothing rolls under it, and a marble would have
- * to be lifted clear of the floor to get over.
+ * even the original 1.8cm covered one completely: nothing rolls under it, and
+ * a marble would have to be lifted clear of the floor to get over. Doubled
+ * from that floor-clearing minimum so the field queued against it — which
+ * only ever reaches 1.6cm up the bar's face — covers no more than its bottom
+ * half, leaving the "START" text in the top half always readable.
  */
-const GATE_BAR_HEIGHT = 1.8;
+const GATE_BAR_HEIGHT = 3.6;
 /** How far the bar rises when it opens, in cm. */
 const GATE_LIFT = 5.4;
 
@@ -172,7 +176,7 @@ export class World {
   private readonly decor: Mesh[] = [];
   private readonly textures: DetailMaps[] = [];
   private readonly trackDetail: DetailMaps | null;
-  private readonly extraTextures: RawTexture[] = [];
+  private readonly extraTextures: BaseTexture[] = [];
   private glow: DefaultRenderingPipeline | null = null;
   private canvasObserver: ResizeObserver | null = null;
   private readonly onStuck: (() => void) | undefined;
@@ -435,7 +439,7 @@ export class World {
     bar.rotationQuaternion = rotation.clone();
     bar.position = frame.position.add(frame.up.scale(GATE_BAR_HEIGHT / 2));
     bar.isPickable = false;
-    if (!this.headless) bar.material = this.flagMaterial("gate-bar-mat", span, GATE_BAR_HEIGHT);
+    if (!this.headless) bar.material = this.startGateMaterial(span, GATE_BAR_HEIGHT);
     this.startGate = bar;
     this.decor.push(bar);
 
@@ -452,10 +456,10 @@ export class World {
   /**
    * A chequered material fitted to one rectangular face.
    *
-   * Shared by the finish banner, the finish deck stripe and the start bar, so
-   * all three read as the same flag apparatus. Each gets its own texture
-   * instance rather than sharing one because the tiling has to be worked out
-   * from that face's own proportions, and the three are different shapes.
+   * Shared by the finish banner and the finish deck stripe, so the two read as
+   * one flag. Each gets its own texture instance rather than sharing one
+   * because the tiling has to be worked out from that face's own proportions,
+   * and the two are different shapes.
    */
   private flagMaterial(name: string, faceWidth: number, faceHeight: number, swap = false): PBRMaterial {
     const chequer = chequerTexture(this.scene);
@@ -467,6 +471,26 @@ export class World {
       glow: this.theme.bloom ? 0.5 : undefined,
     });
     material.albedoTexture = chequer;
+    return material;
+  }
+
+  /**
+   * The start gate's crossbar: "START" over diagonal racing stripes.
+   *
+   * Deliberately not the chequer the finish gantry wears — on a real course
+   * chequer means the race is over, and putting it at the start as well as the
+   * end says the wrong thing however good it looks. This is a different piece
+   * of apparatus doing a different job, so it gets its own face.
+   */
+  private startGateMaterial(faceWidth: number, faceHeight: number): PBRMaterial {
+    const banner = startBannerTexture(this.scene, faceWidth, faceHeight, this.theme.decor.gate);
+    this.extraTextures.push(banner);
+    const material = createSurface(this.scene, "gate-bar-mat", Color3.White(), {
+      metallic: 0.05,
+      roughness: 0.45,
+      glow: this.theme.bloom ? 0.5 : undefined,
+    });
+    material.albedoTexture = banner;
     return material;
   }
 
