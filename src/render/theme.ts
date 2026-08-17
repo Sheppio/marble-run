@@ -29,7 +29,6 @@ export interface Theme {
   blurb: string;
   sky: SkyPalette;
   lighting: ThemeLighting;
-  ground: Color3;
   /** Bloom strength for self-lit surfaces. Omit for themes that do not glow. */
   bloom?: number;
   /** Colours the track from a seed-derived value. */
@@ -76,10 +75,6 @@ const WORKSHOP: Theme = {
     environmentIntensity: 1.0,
     shadowDarkness: 0.25,
   },
-  // Dark: the ground plane fills most of the frame from the broadcast camera,
-  // and at anything lighter it lifts into a flat grey wash that pulls the eye
-  // off the run.
-  ground: Color3.FromHexString("#22371c"),
   track(seedValue) {
     // Honey maple, the colour a bowling lane is, with only enough variation
     // between seeds to stop every track looking stamped from one mould.
@@ -160,7 +155,6 @@ const CARTOON: Theme = {
     // what the shadow pass is for even in a deliberately flat theme.
     shadowDarkness: 0.32,
   },
-  ground: Color3.FromHexString("#2c5c1f"),
   track(seedValue) {
     // A curated set rather than the whole wheel. Letting the seed pick any hue
     // sounds fairer but produces tracks the marbles cannot be seen against —
@@ -228,7 +222,6 @@ const NEON: Theme = {
     environmentIntensity: 0.8,
     shadowDarkness: 0.1,
   },
-  ground: Color3.FromHexString("#0a0a14"),
   bloom: 0.55,
   track(seedValue) {
     // The deck is near-black and almost neutral, and only the edges take the

@@ -240,23 +240,22 @@ export function panelDetail(scene: Scene): DetailMaps {
 }
 
 /**
- * Mown grass.
+ * Fine ripple detail for the water ground plane.
  *
- * The ground plane fills most of the frame from the broadcast camera, so a
- * single flat green is the largest untextured area in the scene and the thing
- * that most makes it look unfinished. Two scales of noise: blades, and the
- * broad patchiness of a real lawn.
+ * The coarse motion — the ground actually rising and falling — is done by
+ * displacing the mesh itself (see `World`'s water animation), which is too
+ * low-frequency on its own to read as a wet surface up close. This is the
+ * layer that does: two scales of noise standing in for small wind-ripples and
+ * the finer texture on top of them. Kept close to white in `shade`, since the
+ * colour is carried by the water material's own albedo — this only needs to
+ * break the surface up with soft highlights and troughs, not tint it.
  */
-export function grassDetail(scene: Scene): DetailMaps {
-  return bake(scene, "grass", DETAIL_SIZE, (u, v) => {
-    const blades = fbm(u, v, 48, 3);
-    const patches = fbm(u, v, 4, 3);
-    // Mower stripes. A lawn with none reads as moss; these give the ground a
-    // sense of scale and direction, which is most of what stops it looking
-    // like a flat green backdrop behind the run.
-    const mown = Math.sin(v * Math.PI * 2 * 2) * 0.5 + 0.5;
-    const height = blades * 0.85 + patches * 0.15;
-    return { height, shade: 0.42 + blades * 0.42 + patches * 0.22 + mown * 0.1 };
+export function waterRippleDetail(scene: Scene): DetailMaps {
+  return bake(scene, "water-ripple", DETAIL_SIZE, (u, v) => {
+    const ripple = fbm(u * 3, v * 3, 24, 4);
+    const fine = fbm(u * 9, v * 9, 40, 2);
+    const height = ripple * 0.7 + fine * 0.3;
+    return { height, shade: 0.82 + ripple * 0.12 + fine * 0.06 };
   });
 }
 

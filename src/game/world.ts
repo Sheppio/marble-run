@@ -30,13 +30,14 @@ import { applyDetail, createSurface } from "../render/materials";
 import {
   chequerTexture,
   fitChequer,
-  grassDetail,
   panelDetail,
   plasticDetail,
   startBannerTexture,
+  waterRippleDetail,
   woodDetail,
   type DetailMaps,
 } from "../render/textures";
+import { VertexBuffer } from "@babylonjs/core/Buffers/buffer";
 import { getTheme, type Theme } from "../render/theme";
 import { detectQuality, type QualitySettings } from "./quality";
 import { BroadcastCamera, type CameraMode } from "./camera";
@@ -61,6 +62,53 @@ const TABLE_DROP = 14;
  * flag reads as a flag at the distance the broadcast camera sits.
  */
 const CHEQUER_CELL = 1.0;
+
+/**
+ * The ground plane's swell, as three overlapping sine waves at different
+ * wavelengths, directions and speeds.
+ *
+ * Three rather than one so the surface never lines up into visibly straight,
+ * repeating ridges — the thing that would give away "it's a sine wave"
+ * fastest. Amplitudes are small (cm, not the tens of cm a real swell would
+ * be) and periods long: this is a still-water ripple, not a sea, and the
+ * request behind it was explicitly for something simple rather than a
+ * convincing ocean.
+ */
+const WATER_WAVES = [
+  { amplitude: 3.2, frequency: 0.017, speed: 0.55, axis: "x" },
+  { amplitude: 2.1, frequency: 0.026, speed: -0.4, axis: "z" },
+  { amplitude: 1.3, frequency: 0.011, speed: 0.7, axis: "xz" },
+] as const;
+
+/** Base colour of the water plane — a deep, still teal. */
+const WATER_COLOUR = Color3.FromHexString("#123a4d");
+
+/** Height of the water surface at a point, in local ground-plane cm. */
+function waterHeight(x: number, z: number, t: number): number {
+  let h = 0;
+  for (const w of WATER_WAVES) {
+    const phase = w.axis === "x" ? x : w.axis === "z" ? z : x + z;
+    h += w.amplitude * Math.sin(phase * w.frequency + t * w.speed);
+  }
+  return h;
+}
+
+/**
+ * The surface's slope at a point, as (dHeight/dx, dHeight/dz) — the analytic
+ * derivative of `waterHeight`, used to build a normal without recomputing one
+ * from the displaced mesh each frame.
+ */
+function waterSlope(x: number, z: number, t: number): [number, number] {
+  let dx = 0;
+  let dz = 0;
+  for (const w of WATER_WAVES) {
+    const phase = w.axis === "x" ? x : w.axis === "z" ? z : x + z;
+    const slope = w.amplitude * w.frequency * Math.cos(phase * w.frequency + t * w.speed);
+    if (w.axis !== "z") dx += slope;
+    if (w.axis !== "x") dz += slope;
+  }
+  return [dx, dz];
+}
 
 /** Stages of the pre-race sequence. */
 type IntroPhase = "none" | "sweep" | "return";
@@ -196,6 +244,8 @@ export class World {
   /** Camera pose at the moment the return leg began. */
   private returnFromEye = new Vector3();
   private returnFromLook = new Vector3();
+  private waterMesh: Mesh | null = null;
+  private waterTime = 0;
 
   constructor(options: WorldOptions) {
     if (!havokInstance) {
@@ -792,38 +842,96 @@ export class World {
   }
 
   /**
-   * The surface the run stands on.
+   * The surface the run stands on: still water with a gentle ripple.
    *
-   * Without it the track floats in an empty sky, which reads as a diagram
-   * rather than an object. A plain ground plane catches the shadows of the run
-   * and its legs, and those shadows are most of what tells you how high above
-   * it any part of the track is.
+   * Without some kind of ground the track floats in an empty sky, which reads
+   * as a diagram rather than an object — a plain plane catches the shadows of
+   * the run and its legs, and those shadows are most of what tells you how
+   * high above it any part of the track is. Water rather than grass because
+   * that was the request; it keeps the shadow-catching job the ground was
+   * always doing, and a wet surface picks up the sky and the run's own
+   * reflection in a way a matte lawn never did.
    */
   private buildFloor(): void {
     let lowest = Infinity;
     for (const frame of this.geometry.frames) lowest = Math.min(lowest, frame.position.y);
 
-    const floor = CreateGround("floor", { width: 1600, height: 1600, subdivisions: 1 }, this.scene);
+    // Subdivided rather than the single quad the grass version used: the
+    // ripple needs vertices to displace. 44 works out to about 36cm a cell,
+    // dense enough against the waves' own 2-6m wavelengths that the surface
+    // reads as smoothly curved rather than faceted. Cut down on the low tier:
+    // this mesh's whole geometry is re-touched and re-uploaded every frame,
+    // which a weak phone's GPU driver feels a lot more than the vertex count
+    // alone suggests — a coarser ripple there is a better trade than a frame
+    // cost that scales with a detail level the tier exists to turn down.
+    const subdivisions = this.quality.tier === "low" ? 18 : 44;
+    const floor = CreateGround(
+      "floor",
+      { width: 1600, height: 1600, subdivisions },
+      this.scene,
+    );
     floor.position.y = lowest - TABLE_DROP;
-    const floorMaterial = createSurface(this.scene, "floor-mat", this.theme.ground, {
-      metallic: 0.0,
-      roughness: 0.95,
-      environmentIntensity: 0.35,
+
+    const floorMaterial = createSurface(this.scene, "floor-mat", WATER_COLOUR, {
+      metallic: 0.05,
+      roughness: 0.12,
+      environmentIntensity: 0.9,
     });
-    const grass = grassDetail(this.scene);
-    this.textures.push(grass);
-    applyDetail(floorMaterial, grass, this.quality.relief);
-    // The plane is 1600cm across; without a heavy tile the grass is a single
-    // smear. This puts a tile roughly every 25cm, about a hand's width.
-    grass.albedo.uScale = 64;
-    grass.albedo.vScale = 64;
-    grass.normal.uScale = 64;
-    grass.normal.vScale = 64;
+    const ripple = waterRippleDetail(this.scene);
+    this.textures.push(ripple);
+    applyDetail(floorMaterial, ripple, this.quality.relief);
+    // Tight relative to a plane this size, so the fine ripple detail reads at
+    // a scale the run actually sits on instead of as one huge smear.
+    ripple.albedo.uScale = 90;
+    ripple.albedo.vScale = 90;
+    ripple.normal.uScale = 90;
+    ripple.normal.vScale = 90;
     floor.material = floorMaterial;
     floor.receiveShadows = true;
     floor.isPickable = false;
-    floor.freezeWorldMatrix();
+    // Not frozen, unlike every other static piece of decor: this mesh's own
+    // vertex data moves every frame — see `updateWater`. Its transform never
+    // changes though, so freezing that part would still be safe; it just
+    // isn't worth a second flag for one mesh.
+    this.waterMesh = floor;
     this.decor.push(floor);
+  }
+
+  /**
+   * Displaces the water plane's vertices into a gentle swell each frame.
+   *
+   * Height and slope both come from the same closed-form sine sum
+   * (`waterHeight` / `waterSlope`), so the normal is exact rather than
+   * approximated from face averages afterwards — cheaper, and it keeps the
+   * surface smoothly shaded at this subdivision instead of needing a denser
+   * mesh to hide faceting.
+   */
+  private updateWater(dt: number): void {
+    const mesh = this.waterMesh;
+    if (!mesh) return;
+    this.waterTime += dt;
+    const t = this.waterTime;
+
+    const positions = mesh.getVerticesData(VertexBuffer.PositionKind);
+    const normals = mesh.getVerticesData(VertexBuffer.NormalKind);
+    if (!positions || !normals) return;
+
+    for (let i = 0; i < positions.length; i += 3) {
+      const x = positions[i];
+      const z = positions[i + 2];
+      positions[i + 1] = waterHeight(x, z, t);
+      const [dx, dz] = waterSlope(x, z, t);
+      const len = Math.hypot(dx, 1, dz);
+      normals[i] = -dx / len;
+      normals[i + 1] = 1 / len;
+      normals[i + 2] = -dz / len;
+    }
+
+    // `true` here recomputes the mesh's bounding info from the new positions;
+    // without it, the culler and anything else that reads the bounds keeps
+    // using the box CreateGround built for a flat plane.
+    mesh.updateVerticesData(VertexBuffer.PositionKind, positions, true);
+    mesh.updateVerticesData(VertexBuffer.NormalKind, normals);
   }
 
   /** Frames the top of the track before the race starts. */
@@ -933,6 +1041,7 @@ export class World {
 
       this.checkStuck(dt);
       this.animateGate(dt);
+      this.updateWater(dt);
       onFrame?.(dt);
       this.scene.render();
     });
@@ -1037,6 +1146,7 @@ export class World {
       mesh.dispose();
     }
     this.decor.length = 0;
+    this.waterMesh = null;
     this.scene.dispose();
     this.engine.dispose();
   }
