@@ -132,6 +132,7 @@ export class World {
   private readonly trackDetail: DetailMaps | null;
   private readonly extraTextures: RawTexture[] = [];
   private glow: DefaultRenderingPipeline | null = null;
+  private canvasObserver: ResizeObserver | null = null;
   private endWall: PhysicsAggregate | null = null;
   private startGate: Mesh | null = null;
   private gateOpenAmount = 0;
@@ -181,6 +182,18 @@ export class World {
     this.scene.ambientColor = new Color3(0.1, 0.12, 0.18);
     this.scene.skipPointerMovePicking = true;
     this.scene.autoClearDepthAndStencil = true;
+    // Held only for the duration of the build, and released at the end of the
+    // constructor. It suppresses the per-material dirty flags that would
+    // otherwise be raised over and over while the run is assembled.
+    //
+    // It must not be left on. Materials here are finished after they are
+    // constructed — detail and relief maps are hung on afterwards, marbles get
+    // their texture and sheen afterwards — and with the mechanism blocked those
+    // changes never mark the material for recompilation. The effect is then
+    // built without the defines those textures need, the material never reports
+    // ready, and Babylon silently skips every mesh using it. Left on, this
+    // showed up as a blank canvas with a perfectly good UI over it, on the
+    // first load and not reliably afterwards.
     this.scene.blockMaterialDirtyMechanism = true;
 
     const plugin = new HavokPlugin(false, havokInstance);
@@ -262,6 +275,10 @@ export class World {
       for (const marble of this.race.marbles) shadowMap?.renderList?.push(marble.mesh);
       for (const caster of this.obstacles.shadowCasters) shadowMap?.renderList?.push(caster);
     }
+
+    // Everything is built and every texture is attached, so material changes
+    // can mark their own materials dirty again from here on.
+    this.scene.blockMaterialDirtyMechanism = false;
 
     this.hookSimulation();
     if (!this.headless) this.positionPreviewCamera();
@@ -673,7 +690,22 @@ export class World {
       this.scene.render();
     });
 
+    // Babylon never re-reads the canvas on its own, and a window resize event
+    // is not a reliable signal on a phone: entering a race usually collapses
+    // the browser chrome, which changes the visual viewport — and in several
+    // mobile browsers that resizes the canvas without firing `resize` on the
+    // window. Watching the element itself catches every case, including the
+    // first layout if it lands after the engine was created.
+    this.observeCanvasSize();
     window.addEventListener("resize", this.handleResize);
+    window.visualViewport?.addEventListener("resize", this.handleResize);
+  }
+
+  private observeCanvasSize(): void {
+    const canvas = this.engine.getRenderingCanvas();
+    if (!canvas || typeof ResizeObserver === "undefined") return;
+    this.canvasObserver = new ResizeObserver(() => this.handleResize());
+    this.canvasObserver.observe(canvas);
   }
 
   private animateGate(dt: number): void {
@@ -689,12 +721,20 @@ export class World {
   }
 
   private handleResize = (): void => {
+    const canvas = this.engine.getRenderingCanvas();
+    // A zero-sized canvas would leave a zero-sized drawing buffer behind, which
+    // renders nothing at all rather than rendering badly. Skip and wait for a
+    // layout that has a size.
+    if (canvas && (canvas.clientWidth === 0 || canvas.clientHeight === 0)) return;
     this.engine.resize();
   };
 
   dispose(): void {
     this.running = false;
+    this.canvasObserver?.disconnect();
+    this.canvasObserver = null;
     window.removeEventListener("resize", this.handleResize);
+    window.visualViewport?.removeEventListener("resize", this.handleResize);
     this.engine.stopRenderLoop();
     this.race.dispose();
     this.endWall?.dispose();
