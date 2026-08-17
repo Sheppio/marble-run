@@ -17,7 +17,13 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { World, initPhysics } from "./game/world";
 import { makePlayers } from "./ui/players";
 import { FIXED_STEP } from "./game/race";
-import { PHYSICS, TRACK_CONSTANTS, UNITS_PER_METRE, toMetresPerSecond } from "./track/plan";
+import {
+  PHYSICS,
+  POINT_SPACING,
+  TRACK_CONSTANTS,
+  UNITS_PER_METRE,
+  toMetresPerSecond,
+} from "./track/plan";
 
 export interface SeedReport {
   seed: string;
@@ -501,12 +507,108 @@ export async function basinTest(
   };
 }
 
+/**
+ * Places a queue of marbles against a baffle at rest and sees whether they get
+ * away, for a range of queue lengths.
+ *
+ * Answers a specific question: why a group of slow marbles on a baffle stops
+ * dead when a single one does not. Each marble in the queue presses the one in
+ * front into the baffle face, and Coulomb friction at that face scales with the
+ * normal force while the gravity component driving the escape does not — so the
+ * queue length should decide it. If that is the mechanism, one marble clears
+ * and some small number sticks.
+ */
+export async function baffleQueueTest(
+  seed: string,
+  maxQueue = 4,
+  settleSeconds = 6,
+): Promise<{
+  seed: string;
+  /** Descent of the track at the baffle, in degrees. */
+  gradientDegrees: number;
+  results: Array<{ queue: number; movedCm: number; escaped: boolean }>;
+}> {
+  await initPhysics();
+
+  const results: Array<{ queue: number; movedCm: number; escaped: boolean }> = [];
+  let gradientDegrees = 0;
+
+  for (let queue = 1; queue <= maxQueue; queue++) {
+    const world = new World({
+      canvas: null,
+      seed,
+      players: makePlayers(Array.from({ length: queue }, (_, i) => `P${i}`)),
+      headless: true,
+    });
+
+    const baffle = world.plan.obstacles.find((o) => o.kind === "baffles");
+    if (!baffle) {
+      world.dispose();
+      break;
+    }
+
+    const { geometry } = world;
+    world.race.probeMode = true;
+    world.race.beginCountdown(0);
+
+    // The spec index is the centre of the group; the individual baffles are
+    // spread either side of it and alternate walls. Target the first one, which
+    // grows from the left, and stack the queue just upstream of it pushed to
+    // that side so they meet its face rather than sail past the tip.
+    const spacing = 8.0;
+    const bafflesInGroup = Math.round((baffle.params.count as number) ?? 2);
+    const firstBaffle = baffle.index - ((bafflesInGroup - 1) * spacing) / 2;
+
+    const radius = TRACK_CONSTANTS.marbleRadius;
+    world.race.marbles.forEach((marble, i) => {
+      const frame = geometry.frameAt(firstBaffle - 1.5 - (i * radius * 2.05) / POINT_SPACING);
+      marble.release();
+      marble.teleport(
+        frame.position
+          .add(frame.right.scale(-frame.width * 0.55))
+          .add(frame.up.scale(radius * 1.2)),
+      );
+    });
+
+    const physicsEngine = world.scene.getPhysicsEngine();
+    const plugin = physicsEngine?.getPhysicsPlugin();
+    const bodies =
+      physicsEngine && "getBodies" in physicsEngine
+        ? (physicsEngine as { getBodies(): unknown[] }).getBodies()
+        : [];
+
+    // The gravity driving an escape goes as sin of this, so it is the other
+    // half of the force balance at the baffle face.
+    const a = geometry.frameAt(firstBaffle - 6).position;
+    const b = geometry.frameAt(firstBaffle + 6).position;
+    const run = Math.hypot(b.x - a.x, b.z - a.z);
+    gradientDegrees = (Math.atan2(a.y - b.y, run) * 180) / Math.PI;
+
+    const leader = world.race.marbles[0];
+    const startAt = leader.position.clone();
+    const steps = Math.ceil(settleSeconds / FIXED_STEP);
+    for (let i = 0; i < steps; i++) {
+      world.scene.onBeforePhysicsObservable.notifyObservers(world.scene);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (plugin as any)?.executeStep(FIXED_STEP, bodies);
+      world.scene.onAfterPhysicsObservable.notifyObservers(world.scene);
+    }
+
+    const movedCm = Vector3.Distance(startAt, leader.position);
+    results.push({ queue, movedCm, escaped: movedCm > radius * 6 });
+    world.dispose();
+  }
+
+  return { seed, gradientDegrees, results };
+}
+
 declare global {
   interface Window {
     runDiagnostic: typeof runDiagnostic;
     runSeed: typeof runSeed;
     restTest: typeof restTest;
     basinTest: typeof basinTest;
+    baffleQueueTest: typeof baffleQueueTest;
   }
 }
 
@@ -514,3 +616,4 @@ window.runDiagnostic = runDiagnostic;
 window.runSeed = runSeed;
 window.restTest = restTest;
 window.basinTest = basinTest;
+window.baffleQueueTest = baffleQueueTest;
