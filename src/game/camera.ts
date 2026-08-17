@@ -21,13 +21,26 @@ import { SpringVector, smoothstep } from "./smoothing";
  * own travel is what stops a tight bend reading as a flick.
  */
 
-export type CameraMode = "broadcast" | "chase" | "wide";
+export type CameraMode = "broadcast" | "chase" | "orbit" | "wide";
 
 const MODE_LABELS: Record<CameraMode, string> = {
   broadcast: "Broadcast",
   chase: "Follow",
+  orbit: "Orbit",
   wide: "Wide",
 };
+
+/**
+ * The two orbiting shots: the same circling overhead framing at two distances.
+ *
+ * Wide shows the run as an object and where the leader sits on it; orbit keeps
+ * that sense of the shape while close enough to see which marble is which and
+ * what the field is doing.
+ */
+const ORBIT_SHOTS = {
+  orbit: { radius: 92, height: 74, lift: 40, smoothTime: 0.85 },
+  wide: { radius: 180, height: 150, lift: 80, smoothTime: 1.1 },
+} as const;
 
 /** How long the shot takes to move across to a new subject, in seconds. */
 const HANDOFF_SECONDS = 1.6;
@@ -71,7 +84,8 @@ export class BroadcastCamera {
   }
 
   cycleMode(): CameraMode {
-    const order: CameraMode[] = ["broadcast", "chase", "wide"];
+    // Ordered from tightest to widest, so cycling pulls steadily back.
+    const order: CameraMode[] = ["broadcast", "chase", "orbit", "wide"];
     this.mode = order[(order.indexOf(this.mode) + 1) % order.length];
     return this.mode;
   }
@@ -126,12 +140,17 @@ export class BroadcastCamera {
     let smoothTime: number;
 
     switch (this.mode) {
+      case "orbit":
       case "wide": {
-        const height = 150 + Math.min(80, subject.speed * 0.3);
-        desiredPosition = frame.position
-          .add(new Vector3(Math.cos(this.swing * 0.25) * 180, height, Math.sin(this.swing * 0.25) * 180));
+        const shot = ORBIT_SHOTS[this.mode];
+        // Rises a little with speed, so a fast passage opens the framing out.
+        const height = shot.height + Math.min(shot.lift, subject.speed * 0.3);
+        const angle = this.swing * 0.25;
+        desiredPosition = frame.position.add(
+          new Vector3(Math.cos(angle) * shot.radius, height, Math.sin(angle) * shot.radius),
+        );
         desiredTarget = frame.position;
-        smoothTime = 1.1;
+        smoothTime = shot.smoothTime;
         break;
       }
       case "chase": {

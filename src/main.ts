@@ -152,7 +152,13 @@ async function startRace(isRetry = false): Promise<void> {
   (window as unknown as { __world?: World }).__world = activeWorld;
 
   hud = new Hud(seed, {
-    onCycleCamera: () => activeWorld.camera.cycleMode(),
+    onCycleCamera: () => {
+      // The label, not the mode id. `cycleMode` returns the internal name, so
+      // the button had been relabelling itself "chase" and "wide" in lower
+      // case after the first press.
+      activeWorld.camera.cycleMode();
+      return activeWorld.camera.modeLabel;
+    },
   });
   showScreen(hud);
 
