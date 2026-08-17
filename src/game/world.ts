@@ -768,7 +768,10 @@ export class World {
 
       this.checkStuck(dt);
       this.animateGate(dt);
-      this.lighting?.followShadows(this.camera.camera.getTarget());
+      // The shadow frustum is sized from how far the camera has pulled back, so
+      // a wide shot still gets shadows across everything it can see.
+      const look = this.camera.camera.getTarget();
+      this.lighting?.followShadows(look, Vector3.Distance(this.camera.camera.position, look));
       onFrame?.(dt);
       this.scene.render();
     });

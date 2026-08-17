@@ -45,6 +45,8 @@ export const DEFAULT_SKY: SkyPalette = {
  * sits, narrow enough to keep the shadow map dense.
  */
 const SHADOW_EXTENT = 110;
+/** Widest the shadow frustum will open, however far the camera pulls back. */
+const SHADOW_MAX_EXTENT = 420;
 
 /** Direction the key light comes from. */
 const SUN_DIRECTION = new Vector3(-0.45, -1, 0.35).normalize();
@@ -184,7 +186,12 @@ export interface WorldLighting {
   sun: DirectionalLight;
   skybox: Mesh;
   /** Keeps the shadow map centred on the action. */
-  followShadows(target: Vector3): void;
+  /**
+   * Keeps the shadow map centred on the action and opened wide enough to cover
+   * what the camera can see. `viewRadius` is how far the camera is from what it
+   * is looking at.
+   */
+  followShadows(target: Vector3, viewRadius?: number): void;
   dispose(): void;
 }
 
@@ -246,6 +253,20 @@ export function createEnvironment(
     shadowGenerator.bias = 0.0008;
     shadowGenerator.normalBias = 0.25;
     shadowGenerator.darkness = options.shadowDarkness;
+    // Fade shadows out as they approach the edge of the shadow frustum.
+    //
+    // Babylon does not bounds-check the shadow lookup, so ground beyond the
+    // frustum samples the map's clamped edge texels and comes out shadowed —
+    // which paints large hard-edged blocks across the lawn wherever the camera
+    // can see further than the map reaches. Fading to unshadowed at the
+    // boundary removes them, and it also hides the seam where real shadows
+    // stop.
+    //
+    // Kept small on purpose. Babylon ramps this from the centre of the
+    // frustum outwards, so at 1.0 it fades nearly every shadow in the scene
+    // rather than just the ones at the boundary — which looked like shadows
+    // had been switched off altogether.
+    shadowGenerator.frustumEdgeFalloff = 0.12;
     // Every other frame. The whole run is in the caster list, so this is the
     // most expensive draw in the scene, and both the camera and the light it
     // follows move slowly enough that a one-frame-old shadow map is not
@@ -258,10 +279,20 @@ export function createEnvironment(
     shadowGenerator,
     sun,
     skybox,
-    followShadows(target: Vector3) {
-      // Park the light just up-sun of whatever we're watching so the shadow
-      // frustum stays tight and the shadows stay crisp.
-      sun.position.copyFrom(target.subtract(SUN_DIRECTION.scale(160)));
+    followShadows(target: Vector3, viewRadius = SHADOW_EXTENT) {
+      // Open the frustum to roughly what the camera can see, rather than
+      // holding it at one size. Fixed, it was tight enough to be sharp behind
+      // the broadcast camera and far too small for the wide shots, where most
+      // of the run fell outside it and simply stopped casting.
+      const extent = Math.min(SHADOW_MAX_EXTENT, Math.max(SHADOW_EXTENT, viewRadius));
+      sun.orthoLeft = -extent;
+      sun.orthoRight = extent;
+      sun.orthoBottom = -extent;
+      sun.orthoTop = extent;
+      sun.shadowMaxZ = extent * 3.2;
+      // Park the light just up-sun of whatever we're watching, far enough back
+      // that the run is inside the near plane at any of these sizes.
+      sun.position.copyFrom(target.subtract(SUN_DIRECTION.scale(extent * 1.5)));
     },
     dispose() {
       shadowGenerator?.dispose();
