@@ -15,6 +15,10 @@ import type { Standing } from "../game/race";
 const TWO_COLUMN_FROM = 5;
 const THREE_COLUMN_FROM = 9;
 
+/** Plain glyphs rather than emoji, so they render as a single flat colour. */
+const PAUSE_ICON = "❚❚";
+const PLAY_ICON = "▶";
+
 export interface HudCallbacks {
   onCycleCamera(): string;
   /** Returns the new paused state. */
@@ -57,16 +61,21 @@ export class Hud {
 
     // Sits directly under the clock rather than alongside the camera button,
     // so it reads as "the timer's own control" instead of another item in the
-    // top bar's row of unrelated chips.
+    // top bar's row of unrelated chips. Icon rather than a word: the two
+    // states are the standard pause/play glyphs, read at a glance the way
+    // "Pause"/"Resume" as text needs an instant of reading first.
     this.pauseButton = el("button", {
       class: "btn btn-pause",
       type: "button",
-      text: "Pause",
+      text: PAUSE_ICON,
       title: "Pause the race",
     });
+    this.pauseButton.setAttribute("aria-label", "Pause the race");
     this.pauseButton.addEventListener("click", () => {
       const paused = this.callbacks.onTogglePause();
-      this.pauseButton.textContent = paused ? "Resume" : "Pause";
+      this.pauseButton.textContent = paused ? PLAY_ICON : PAUSE_ICON;
+      this.pauseButton.title = paused ? "Resume the race" : "Pause the race";
+      this.pauseButton.setAttribute("aria-label", this.pauseButton.title);
       this.pauseButton.classList.toggle("btn-pause-active", paused);
     });
     const clockStack = el("div", { class: "clock-stack" }, [this.clockNode, this.pauseButton]);

@@ -521,11 +521,22 @@ export function startBannerTexture(
   }
   ctx.restore();
 
-  // Text sits high in the top portion, clear of where the queued field's own
-  // heads reach — see the function comment above. Pulled close to the top
-  // edge rather than centred on the top half, which is what leaves room for
-  // as big a word as fits above the marbles.
-  const textY = height * 0.19;
+  // Sized and placed from the font's own reported metrics rather than a
+  // guessed cap-height fraction — measured directly, the fraction of the
+  // canvas an "actualBoundingBox" ascent+descent occupies at a given font
+  // size varies enough between fallback fonts that guessing left the first
+  // version of this either cramped against the top edge or overlapping the
+  // stripe below it.
+  const fontPx = Math.round(height * 0.5);
+  ctx.font = `900 ${fontPx}px Arial, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const glyphs = ctx.measureText("START");
+  const lineWidth = height * 0.06;
+  // A margin clear of the top edge, then the text's own ascent, landing the
+  // baseline-ish anchor point `textY` down from there.
+  const topMargin = height * 0.05;
+  const textY = topMargin + glyphs.actualBoundingBoxAscent + lineWidth / 2;
 
   // A soft highlight behind the text, so it sits on its own patch of light
   // rather than straddling a stripe seam wherever the layout happens to land.
@@ -535,11 +546,8 @@ export function startBannerTexture(
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, width, height);
 
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.font = `900 ${Math.round(height * 0.42)}px Arial, sans-serif`;
   ctx.lineJoin = "round";
-  ctx.lineWidth = height * 0.06;
+  ctx.lineWidth = lineWidth;
   ctx.strokeStyle = "#1a1a1a";
   ctx.strokeText("START", width / 2, textY);
   ctx.fillStyle = light.toHexString();
