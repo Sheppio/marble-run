@@ -33,7 +33,7 @@ import {
   panelDetail,
   plasticDetail,
   startBannerTexture,
-  waterRippleDetail,
+  waterColorDetail,
   woodDetail,
   type DetailMaps,
 } from "../render/textures";
@@ -69,19 +69,19 @@ const CHEQUER_CELL = 1.0;
  *
  * Three rather than one so the surface never lines up into visibly straight,
  * repeating ridges — the thing that would give away "it's a sine wave"
- * fastest. Amplitudes are small (cm, not the tens of cm a real swell would
- * be) and periods long: this is a still-water ripple, not a sea, and the
- * request behind it was explicitly for something simple rather than a
- * convincing ocean.
+ * fastest. Sized against a 1.6cm marble rather than against the 1600cm plane
+ * as a whole: the first version's waves were metres long and a couple of
+ * centimetres tall, which is a proper scale for a lake seen from the air and
+ * an invisible one for a camera sitting close to a track built at marble
+ * scale. Wavelengths here are on the order of a metre and amplitudes in the
+ * 4-9cm range, so the undulation actually reads as surface rather than as a
+ * slow, flat tilt.
  */
 const WATER_WAVES = [
-  { amplitude: 3.2, frequency: 0.017, speed: 0.55, axis: "x" },
-  { amplitude: 2.1, frequency: 0.026, speed: -0.4, axis: "z" },
-  { amplitude: 1.3, frequency: 0.011, speed: 0.7, axis: "xz" },
+  { amplitude: 11, frequency: 0.028, speed: 0.55, axis: "x" },
+  { amplitude: 7, frequency: 0.045, speed: -0.4, axis: "z" },
+  { amplitude: 4.5, frequency: 0.02, speed: 0.7, axis: "xz" },
 ] as const;
-
-/** Base colour of the water plane — a deep, still teal. */
-const WATER_COLOUR = Color3.FromHexString("#123a4d");
 
 /** Height of the water surface at a point, in local ground-plane cm. */
 function waterHeight(x: number, z: number, t: number): number {
@@ -857,14 +857,17 @@ export class World {
     for (const frame of this.geometry.frames) lowest = Math.min(lowest, frame.position.y);
 
     // Subdivided rather than the single quad the grass version used: the
-    // ripple needs vertices to displace. 44 works out to about 36cm a cell,
-    // dense enough against the waves' own 2-6m wavelengths that the surface
-    // reads as smoothly curved rather than faceted. Cut down on the low tier:
-    // this mesh's whole geometry is re-touched and re-uploaded every frame,
-    // which a weak phone's GPU driver feels a lot more than the vertex count
-    // alone suggests — a coarser ripple there is a better trade than a frame
-    // cost that scales with a detail level the tier exists to turn down.
-    const subdivisions = this.quality.tier === "low" ? 18 : 44;
+    // waves need vertices to displace. 56 works out to about 29cm a cell,
+    // close to five samples across the shortest wave's own ~140cm
+    // wavelength — coarser than that and the displacement itself starts
+    // faceting rather than curving, on top of the per-vertex analytic
+    // normals that keep the *shading* smooth however coarse the mesh is.
+    // Cut down on the low tier: this mesh's whole geometry is re-touched and
+    // re-uploaded every frame, which a weak phone's GPU driver feels a lot
+    // more than the vertex count alone suggests — a coarser sea there is a
+    // better trade than a frame cost that scales with a detail level the
+    // tier exists to turn down.
+    const subdivisions = this.quality.tier === "low" ? 22 : 56;
     const floor = CreateGround(
       "floor",
       { width: 1600, height: 1600, subdivisions },
@@ -872,12 +875,17 @@ export class World {
     );
     floor.position.y = lowest - TABLE_DROP;
 
-    const floorMaterial = createSurface(this.scene, "floor-mat", WATER_COLOUR, {
+    // White rather than a tinted colour: unlike every other surface here, the
+    // water's colour is baked directly into the detail texture as real hue
+    // variation (see `waterColorDetail`), not carried by the material and
+    // multiplied through a greyscale map. A tint on top would just wash the
+    // contrast back out.
+    const floorMaterial = createSurface(this.scene, "floor-mat", Color3.White(), {
       metallic: 0.05,
       roughness: 0.12,
       environmentIntensity: 0.9,
     });
-    const ripple = waterRippleDetail(this.scene);
+    const ripple = waterColorDetail(this.scene);
     this.textures.push(ripple);
     applyDetail(floorMaterial, ripple, this.quality.relief);
     // Tight relative to a plane this size, so the fine ripple detail reads at

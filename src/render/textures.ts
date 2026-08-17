@@ -239,24 +239,88 @@ export function panelDetail(scene: Scene): DetailMaps {
   });
 }
 
+/** Water's own tones: dark in the troughs, lighter where a wave catches the light, and rare bright glints. */
+const WATER_DEEP = Color3.FromHexString("#0a2836");
+const WATER_LIT = Color3.FromHexString("#4fa8bd");
+const WATER_GLINT = Color3.FromHexString("#eef8fa");
+
 /**
- * Fine ripple detail for the water ground plane.
+ * Colour and relief for the water ground plane, baked together.
  *
  * The coarse motion — the ground actually rising and falling — is done by
  * displacing the mesh itself (see `World`'s water animation), which is too
  * low-frequency on its own to read as a wet surface up close. This is the
  * layer that does: two scales of noise standing in for small wind-ripples and
- * the finer texture on top of them. Kept close to white in `shade`, since the
- * colour is carried by the water material's own albedo — this only needs to
- * break the surface up with soft highlights and troughs, not tint it.
+ * the finer texture on top of them.
+ *
+ * Unlike every other surface in this file, the colour here is not a flat
+ * material tint multiplied by a greyscale map — it is baked as real hue
+ * variation, dark in the troughs and lighter where the noise peaks, with a
+ * sparse, sharply thresholded layer of near-white glints standing in for sun
+ * catching the odd wave face. A single tint times a brightness map reads as
+ * "shaded", not as water with any depth to it; real water's colour comes from
+ * how much of what you're looking at is sky reflection (bright) versus the
+ * water itself seen through the surface (dark), which varies with the local
+ * slope far more than a uniform tint can fake.
  */
-export function waterRippleDetail(scene: Scene): DetailMaps {
-  return bake(scene, "water-ripple", DETAIL_SIZE, (u, v) => {
-    const ripple = fbm(u * 3, v * 3, 24, 4);
-    const fine = fbm(u * 9, v * 9, 40, 2);
-    const height = ripple * 0.7 + fine * 0.3;
-    return { height, shade: 0.82 + ripple * 0.12 + fine * 0.06 };
-  });
+export function waterColorDetail(scene: Scene): DetailMaps {
+  const size = DETAIL_SIZE;
+  const albedoData = new Uint8Array(size * size * 4);
+  const normalData = new Uint8Array(size * size * 4);
+  const heights = new Float32Array(size * size);
+
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = x / size;
+      const v = y / size;
+      const ripple = fbm(u * 3, v * 3, 24, 4);
+      const fine = fbm(u * 9, v * 9, 40, 2);
+      const height = ripple * 0.7 + fine * 0.3;
+      heights[y * size + x] = height;
+
+      const lit = Math.max(0, Math.min(1, ripple * 0.65 + fine * 0.35));
+      const base = Color3.Lerp(WATER_DEEP, WATER_LIT, lit);
+
+      // Glints: a finer, sparser noise, thresholded hard so most of the
+      // surface gets none at all and what's left reads as scattered points
+      // rather than a second layer of shading.
+      const glintNoise = fbm(u * 22 + 4.1, v * 22 + 1.7, 70, 2);
+      const glint = Math.pow(Math.max(0, (glintNoise - 0.8) / 0.2), 3);
+      const color = Color3.Lerp(base, WATER_GLINT, Math.min(1, glint));
+
+      const i = (y * size + x) * 4;
+      albedoData[i] = Math.round(Math.max(0, Math.min(1, color.r)) * 255);
+      albedoData[i + 1] = Math.round(Math.max(0, Math.min(1, color.g)) * 255);
+      albedoData[i + 2] = Math.round(Math.max(0, Math.min(1, color.b)) * 255);
+      albedoData[i + 3] = 255;
+    }
+  }
+
+  // Central differences on the baked height field, wrapping at the edges —
+  // the same construction `bake()` uses for every other detail map, just
+  // inlined here because this function bakes its own (non-greyscale) albedo
+  // instead of going through `bake()`'s Field callback.
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const left = heights[y * size + ((x - 1 + size) % size)];
+      const right = heights[y * size + ((x + 1) % size)];
+      const up = heights[((y - 1 + size) % size) * size + x];
+      const down = heights[((y + 1) % size) * size + x];
+
+      const dx = (right - left) * NORMAL_STRENGTH;
+      const dy = (down - up) * NORMAL_STRENGTH;
+      const length = Math.hypot(dx, dy, 1);
+      const i = (y * size + x) * 4;
+      normalData[i] = Math.round(((-dx / length) * 0.5 + 0.5) * 255);
+      normalData[i + 1] = Math.round(((-dy / length) * 0.5 + 0.5) * 255);
+      normalData[i + 2] = Math.round((1 / length) * 0.5 * 255 + 127.5);
+      normalData[i + 3] = 255;
+    }
+  }
+
+  const albedo = raw(scene, "water-color-albedo", albedoData, size);
+  const normal = raw(scene, "water-color-normal", normalData, size);
+  return { albedo, normal };
 }
 
 function fract(x: number): number {
