@@ -27,6 +27,7 @@ import { buildObstacles, frameRotation, type ObstacleSet } from "../track/obstac
 import { hashSeed } from "../core/rng";
 import { createEnvironment, type WorldLighting } from "../render/environment";
 import { applyDetail, createSurface } from "../render/materials";
+import { buildBoat, boatOrientation, type Boat } from "../render/boat";
 import {
   chequerTexture,
   fitChequer,
@@ -109,6 +110,23 @@ function waterSlope(x: number, z: number, t: number): [number, number] {
   }
   return [dx, dz];
 }
+
+/**
+ * The toy boat's path: a slow circle centred near the middle of the arena.
+ *
+ * A track starts out near the arena's rim and spirals inward — see
+ * `generateTrack` — so the interior tends to be the most open water going,
+ * and the most likely to actually sit under a stretch of the run rather than
+ * out past its edge. Not chosen from any given track's own footprint, on
+ * purpose: a boat that had to dodge a specific seed's legs would need real
+ * collision logic for something that is decoration and cannot affect a race
+ * either way, and one seed's dodge is the next seed's detour into a clear
+ * patch of water for no visible reason.
+ */
+const BOAT_ORBIT_RADIUS = 140;
+const BOAT_ANGULAR_SPEED = 0.05;
+/** How high the hull's deck line floats above the flat waterline, in cm. */
+const BOAT_FREEBOARD = 1.1;
 
 /** Stages of the pre-race sequence. */
 type IntroPhase = "none" | "sweep" | "return";
@@ -246,6 +264,10 @@ export class World {
   private returnFromLook = new Vector3();
   private waterMesh: Mesh | null = null;
   private waterTime = 0;
+  /** World Y the water plane's own local (unrippled) surface sits at. */
+  private waterBaseY = 0;
+  private boat: Boat | null = null;
+  private boatTime = 0;
 
   constructor(options: WorldOptions) {
     if (!havokInstance) {
@@ -896,6 +918,7 @@ export class World {
       this.scene,
     );
     floor.position.y = lowest - TABLE_DROP;
+    this.waterBaseY = floor.position.y;
 
     // White rather than a tinted colour: unlike every other surface here, the
     // water's colour is baked directly into the detail texture as real hue
@@ -925,6 +948,34 @@ export class World {
     // isn't worth a second flag for one mesh.
     this.waterMesh = floor;
     this.decor.push(floor);
+
+    // Purely for the look of it — see `buildBoat`'s own comment for why.
+    this.boat = buildBoat(this.scene);
+  }
+
+  /**
+   * Sails the toy boat slowly round its circular path, riding the current
+   * water height and slope at wherever it currently is rather than floating
+   * dead flat through the swell.
+   */
+  private updateBoat(dt: number): void {
+    const boat = this.boat;
+    if (!boat) return;
+    this.boatTime += dt;
+    const t = this.boatTime;
+
+    const angle = t * BOAT_ANGULAR_SPEED;
+    const x = Math.cos(angle) * BOAT_ORBIT_RADIUS;
+    const z = Math.sin(angle) * BOAT_ORBIT_RADIUS;
+    // Tangent to the circle — the direction of travel, for heading.
+    const heading = new Vector3(-Math.sin(angle), 0, Math.cos(angle));
+
+    const y = this.waterBaseY + waterHeight(x, z, t) + BOAT_FREEBOARD;
+    const [dx, dz] = waterSlope(x, z, t);
+    const up = new Vector3(-dx, 1, -dz).normalize();
+
+    boat.root.position.set(x, y, z);
+    boat.root.rotationQuaternion = boatOrientation(heading, up);
   }
 
   /**
@@ -1072,6 +1123,7 @@ export class World {
       this.checkStuck(dt);
       this.animateGate(dt);
       this.updateWater(dt);
+      this.updateBoat(dt);
       onFrame?.(dt);
       this.scene.render();
     });
@@ -1177,6 +1229,8 @@ export class World {
     }
     this.decor.length = 0;
     this.waterMesh = null;
+    this.boat?.dispose();
+    this.boat = null;
     this.scene.dispose();
     this.engine.dispose();
   }
