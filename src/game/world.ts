@@ -613,6 +613,17 @@ export class World {
       glow: this.theme.bloom ? 0.5 : undefined,
     });
     material.albedoTexture = banner;
+    // A world-space gap between these planes and the box behind them is not
+    // enough on its own: a standard perspective depth buffer loses precision
+    // roughly with the square of distance, and this gate gets looked back at
+    // from as far as the far end of the run — over a thousand centimetres on
+    // a long track. At that range a few centimetres of separation falls
+    // inside the buffer's precision, the depth test starts resolving
+    // inconsistently pixel to pixel, and the box's own plain face shows
+    // through in patches. `zOffset` biases the depth comparison directly
+    // rather than the surface's actual position, so it stays reliable at any
+    // distance instead of degrading with it.
+    material.zOffset = -4;
     return material;
   }
 
