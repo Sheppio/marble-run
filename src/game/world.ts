@@ -539,14 +539,19 @@ export class World {
     // planes, each with its own independently correct copy of the texture,
     // sidesteps that UV relationship entirely instead of fighting it.
     if (!this.headless) {
+      // Parented to the bar rather than positioned in world space: the bar
+      // rises on `animateGate` when the race starts, and a banner placed by
+      // its own absolute position at build time would just get left behind
+      // at the old height instead of rising with it.
       const faceGap = 0.3;
       const upstream = CreatePlane(
         "start-gate-upstream",
         { width: span, height: GATE_BAR_HEIGHT },
         this.scene,
       );
-      upstream.rotationQuaternion = rotation.clone();
-      upstream.position = bar.position.subtract(frame.tangent.scale(faceGap));
+      upstream.parent = bar;
+      upstream.rotationQuaternion = Quaternion.Identity();
+      upstream.position = new Vector3(0, 0, -faceGap);
       upstream.material = this.startGateMaterial(span, GATE_BAR_HEIGHT);
       upstream.isPickable = false;
       this.decor.push(upstream);
@@ -556,10 +561,13 @@ export class World {
         { width: span, height: GATE_BAR_HEIGHT },
         this.scene,
       );
-      const md = Matrix.Identity();
-      Matrix.FromXYZAxesToRef(frame.right.scale(-1), frame.up, frame.tangent.scale(-1), md);
-      downstream.rotationQuaternion = Quaternion.FromRotationMatrix(md);
-      downstream.position = bar.position.add(frame.tangent.scale(faceGap));
+      downstream.parent = bar;
+      // A 180° turn about the bar's own up axis — equivalent to the
+      // (frame.right * -1, frame.up, frame.tangent * -1) frame this used to
+      // be built with directly in world space, but expressed relative to the
+      // parent so it still comes out right wherever the bar has moved to.
+      downstream.rotationQuaternion = Quaternion.RotationAxis(Vector3.Up(), Math.PI);
+      downstream.position = new Vector3(0, 0, faceGap);
       downstream.material = this.startGateMaterial(span, GATE_BAR_HEIGHT);
       downstream.isPickable = false;
       this.decor.push(downstream);
