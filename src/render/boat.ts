@@ -107,10 +107,15 @@ function createHull(scene: Scene): Mesh {
       scaleFunction: (i) => scales[Math.min(i, scales.length - 1)],
       cap: Mesh.CAP_START,
       sideOrientation: Mesh.DOUBLESIDE,
-      // The path runs straight along Z; without this Path3D has no reliable
-      // way to pick a normal for the shape's local frame and the hull can
-      // come out collapsed or twisted.
-      firstNormal: new Vector3(0, 1, 0),
+      // The path runs straight along Z, so Path3D needs an explicit normal
+      // to build a frame at all. ExtrudeShapeCustom places each shape point
+      // at normal*x + binormal*y, and binormal = cross(tangent, normal) —
+      // with tangent along Z, a normal of (0,1,0) makes the binormal
+      // (-1,0,0), which swaps the shape's beam (its x) onto world Y and its
+      // depth (its y) onto world X: the hull built lying on its side. A
+      // normal of (1,0,0) gives binormal (0,1,0), the mapping the shape was
+      // actually authored for (x = beam, y = depth, keel down).
+      firstNormal: new Vector3(1, 0, 0),
     },
     scene,
   );
