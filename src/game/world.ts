@@ -43,7 +43,6 @@ import { getTheme, type Theme } from "../render/theme";
 import { detectQuality, type QualitySettings } from "./quality";
 import { BroadcastCamera, type CameraMode } from "./camera";
 import { Race, FIXED_STEP, type RaceEvents } from "./race";
-import { smoothstep } from "./smoothing";
 import type { Player } from "./marble";
 import { GRAVITY, TRACK_CONSTANTS, type TrackPlan } from "../track/plan";
 
@@ -172,9 +171,6 @@ const BOAT_FREEBOARD = 1.1;
 /** Steepest local wave slope the boat's tilt will follow — see `updateBoat`. */
 const BOAT_MAX_TILT_SLOPE = 0.36;
 
-/** Stages of the pre-race sequence. */
-type IntroPhase = "none" | "sweep" | "return";
-
 /**
  * Where the gate stands, in centreline points past the start of the shelf.
  *
@@ -197,17 +193,6 @@ const GATE_INDEX_OFFSET = 2;
 const GATE_BAR_HEIGHT = 3.6;
 /** How far the bar rises when it opens, in cm. */
 const GATE_LIFT = 5.4;
-
-/**
- * How long the flythrough down the track takes, in seconds.
- *
- * Short on purpose. This runs before every race including rematches on the
- * same track, and the whole sequence — sweep, return, then a three-second
- * countdown — is about six seconds before anything moves.
- */
-const SWEEP_SECONDS = 1.8;
-/** How long the camera takes to come back to the grid afterwards. */
-const RETURN_SECONDS = 0.9;
 
 /** How long the scene may fail to draw before it is treated as stuck. */
 const STUCK_SECONDS = 5;
@@ -297,15 +282,8 @@ export class World {
   private startGate: Mesh | null = null;
   private gateBody: PhysicsAggregate | null = null;
   private gateOpenAmount = 0;
-  private previewProgress = 0;
   private running = false;
   private paused = false;
-  private intro: IntroPhase = "none";
-  private introTime = 0;
-  private introSeconds = 3;
-  /** Camera pose at the moment the return leg began. */
-  private returnFromEye = new Vector3();
-  private returnFromLook = new Vector3();
   private waterMesh: Mesh | null = null;
   private waterTime = 0;
   /** World Y the water plane's own local (unrippled) surface sits at. */
@@ -1161,64 +1139,19 @@ export class World {
   }
 
   /**
-   * Runs the pre-race sequence: fly the track, come back to the grid, then
-   * count down.
+   * Starts the countdown, camera already framed on the grid.
    *
-   * These used to happen at once — the flythrough played *over* the countdown —
-   * so at "GO" the camera was at the far end of the run and had to fly the
-   * whole way back with the race already under way. The start was over before
-   * you saw it. Doing it in order costs a couple of seconds but means the
-   * countdown ends with the camera already pointed at the grid.
+   * This used to run a flythrough of the whole track first — sweep out,
+   * sweep back — before the countdown began. It ran before every race,
+   * including rematches on the same track already seen once, and added a
+   * couple of seconds each time for a look that was over before it landed.
    */
   startCountdown(seconds = 3): void {
-    this.previewProgress = 0;
-    this.introSeconds = seconds;
-    this.introTime = 0;
-    if (this.headless) {
-      // Nothing to look at, and the tuning harness runs thousands of these.
-      this.race.beginCountdown(seconds);
-      return;
+    if (!this.headless) {
+      const { eye, look } = this.camera.gridFraming();
+      this.camera.snapTo(eye, look);
     }
-    this.intro = "sweep";
-  }
-
-  /**
-   * Advances the pre-race sequence, returning true while it still owns the
-   * camera.
-   */
-  private updateIntro(dt: number): boolean {
-    if (this.intro === "none") return false;
-    this.introTime += dt;
-
-    if (this.intro === "sweep") {
-      this.previewProgress = Math.min(1, this.introTime / SWEEP_SECONDS);
-      this.camera.previewAt(this.previewProgress);
-      if (this.previewProgress >= 1) {
-        // Capture the pose the sweep ended on, so the return leg can ease out
-        // of exactly where it is rather than jumping.
-        this.returnFromEye.copyFrom(this.camera.camera.position);
-        this.returnFromLook.copyFrom(this.camera.currentLook);
-        this.intro = "return";
-        this.introTime = 0;
-      }
-      return true;
-    }
-
-    // Returning: a straight eased blend back to the grid. Smoothstep rather
-    // than a spring, because this has to *finish* — the countdown starts the
-    // instant it does, and a spring only ever approaches its target.
-    const t = smoothstep(this.introTime / RETURN_SECONDS);
-    const { eye, look } = this.camera.gridFraming();
-    this.camera.snapTo(
-      Vector3.Lerp(this.returnFromEye, eye, t),
-      Vector3.Lerp(this.returnFromLook, look, t),
-    );
-
-    if (this.introTime >= RETURN_SECONDS) {
-      this.intro = "none";
-      this.race.beginCountdown(this.introSeconds);
-    }
-    return true;
+    this.race.beginCountdown(seconds);
   }
 
   /**
@@ -1244,9 +1177,7 @@ export class World {
       if (this.paused) return;
       const dt = Math.min(0.1, this.engine.getDeltaTime() / 1000);
 
-      if (this.updateIntro(dt)) {
-        // The intro owns the camera until it hands over to the countdown.
-      } else if (this.race.state === "countdown") {
+      if (this.race.state === "countdown") {
         // Hold the grid shot so the flag drops on a settled camera.
         const { eye, look } = this.camera.gridFraming();
         this.camera.snapTo(eye, look);

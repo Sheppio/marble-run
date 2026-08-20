@@ -151,22 +151,6 @@ export class BroadcastCamera {
     return MODE_LABELS[this.mode];
   }
 
-  /** Sweeps the whole track top to bottom, for the pre-race countdown. */
-  previewAt(t: number): void {
-    const index = t * (this.geometry.frames.length - 1);
-    const frame = this.geometry.frameAt(index);
-    const angle = t * Math.PI * 2.2;
-    const radius = 130 + 45 * Math.sin(t * Math.PI);
-    const position = frame.position.add(
-      new Vector3(Math.cos(angle) * radius, 55 + 25 * Math.cos(t * Math.PI * 2), Math.sin(angle) * radius),
-    );
-    // Fixed blends rather than springs: the flythrough is on a scripted path
-    // and wants to track it exactly, not lag behind it.
-    this.eye.value.copyFrom(Vector3.Lerp(this.eye.value, position, 0.08));
-    this.look.value.copyFrom(Vector3.Lerp(this.look.value, frame.position, 0.12));
-    this.apply();
-  }
-
   update(race: Race, dt: number): void {
     const subject = this.pickSubject(race);
     if (!subject) return;
@@ -303,11 +287,6 @@ export class BroadcastCamera {
     this.eye.step(desired, dt, 1.4, MAX_EYE_SPEED);
     this.look.step(frame.position, dt, 1.4);
     this.apply();
-  }
-
-  /** The point the camera is currently looking at. */
-  get currentLook(): Vector3 {
-    return this.look.value;
   }
 
   /**
