@@ -1012,7 +1012,17 @@ export class World {
       { width: 9000, height: 9000, subdivisions: 2 },
       this.scene,
     );
-    horizon.position.y = floor.position.y;
+    // This plane's whole footprint sits underneath the animated one, not
+    // just the ring outside it, so a flat plane at the animated plane's own
+    // rest height pokes up through every trough the waves dip below zero —
+    // which read as a rippled, banded tear where the two overlapped rather
+    // than as one continuous sea. Dropped comfortably below the deepest
+    // trough the waves can ever reach clears it everywhere they overlap; the
+    // handful of centimetres that leaves showing at the animated plane's own
+    // (already near-flat, per the falloff) edge is nowhere near enough to
+    // read as a step at the distance and with the fog that edge sits behind.
+    const maxWaveDepth = WATER_WAVES.reduce((sum, w) => sum + w.amplitude, 0);
+    horizon.position.y = floor.position.y - maxWaveDepth - 2;
     horizon.material = floorMaterial;
     horizon.receiveShadows = false;
     horizon.isPickable = false;
