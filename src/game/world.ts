@@ -70,18 +70,21 @@ const CHEQUER_CELL = 1.0;
  *
  * Three rather than one so the surface never lines up into visibly straight,
  * repeating ridges — the thing that would give away "it's a sine wave"
- * fastest. Sized against a 1.6cm marble rather than against the 1600cm plane
- * as a whole: the first version's waves were metres long and a couple of
- * centimetres tall, which is a proper scale for a lake seen from the air and
- * an invisible one for a camera sitting close to a track built at marble
- * scale. Wavelengths here are on the order of a metre and amplitudes in the
- * 4-9cm range, so the undulation actually reads as surface rather than as a
- * slow, flat tilt.
+ * fastest. Sized against the 16cm toy boat, which is the one thing that
+ * actually sits on the water (the marbles ride the track above it) — a
+ * previous pass sized these against the plane's own 1600cm span instead and
+ * ended up with a ~2.2m dominant wavelength, more than ten boat-lengths
+ * across. At that ratio the boat barely tilts as it crosses one, and the
+ * whole sheet reads as a slow, flat lean rather than a surface with waves on
+ * it. Wavelengths here run roughly one to four boat-lengths and amplitudes
+ * are large enough that the boat visibly rocks and pitches as it rides them,
+ * which is what "waves" needs to look like at this scale even though it's
+ * well past what a real lake's chop would be relative to its own ripples.
  */
 const WATER_WAVES = [
-  { amplitude: 11, frequency: 0.028, speed: 0.55, axis: "x" },
-  { amplitude: 7, frequency: 0.045, speed: -0.4, axis: "z" },
-  { amplitude: 4.5, frequency: 0.02, speed: 0.7, axis: "xz" },
+  { amplitude: 16, frequency: 0.048, speed: 0.6, axis: "x" },
+  { amplitude: 9, frequency: 0.074, speed: -0.45, axis: "z" },
+  { amplitude: 5, frequency: 0.114, speed: 0.8, axis: "xz" },
 ] as const;
 
 /** Height of the water surface at a point, in local ground-plane cm. */
@@ -127,6 +130,8 @@ const BOAT_ORBIT_RADIUS = 140;
 const BOAT_ANGULAR_SPEED = 0.05;
 /** How high the hull's deck line floats above the flat waterline, in cm. */
 const BOAT_FREEBOARD = 1.1;
+/** Steepest local wave slope the boat's tilt will follow — see `updateBoat`. */
+const BOAT_MAX_TILT_SLOPE = 0.36;
 
 /** Stages of the pre-race sequence. */
 type IntroPhase = "none" | "sweep" | "return";
@@ -920,17 +925,19 @@ export class World {
     for (const frame of this.geometry.frames) lowest = Math.min(lowest, frame.position.y);
 
     // Subdivided rather than the single quad the grass version used: the
-    // waves need vertices to displace. 56 works out to about 29cm a cell,
-    // close to five samples across the shortest wave's own ~140cm
-    // wavelength — coarser than that and the displacement itself starts
-    // faceting rather than curving, on top of the per-vertex analytic
-    // normals that keep the *shading* smooth however coarse the mesh is.
-    // Cut down on the low tier: this mesh's whole geometry is re-touched and
+    // waves need vertices to displace. 80 works out to about 20cm a cell,
+    // close to four samples across the shortest wave's own ~55cm wavelength
+    // — coarser than that and the displacement itself starts faceting
+    // rather than curving, on top of the per-vertex analytic normals that
+    // keep the *shading* smooth however coarse the mesh is. That resolution
+    // is only for "high": this mesh's whole geometry is re-touched and
     // re-uploaded every frame, which a weak phone's GPU driver feels a lot
-    // more than the vertex count alone suggests — a coarser sea there is a
-    // better trade than a frame cost that scales with a detail level the
-    // tier exists to turn down.
-    const subdivisions = this.quality.tier === "low" ? 22 : 56;
+    // more than the vertex count alone suggests, and "medium" covers most
+    // phones this runs on — not just the "low" tier's weakest ones. Both get
+    // a coarser (and by the same maths, flatter-looking) sea instead, rather
+    // than paying a frame cost that scales with a detail level the tier
+    // exists to turn down.
+    const subdivisions = this.quality.tier === "high" ? 80 : this.quality.tier === "medium" ? 56 : 30;
     const floor = CreateGround(
       "floor",
       { width: 1600, height: 1600, subdivisions },
@@ -990,7 +997,20 @@ export class World {
     const heading = new Vector3(-Math.sin(angle), 0, Math.cos(angle));
 
     const y = this.waterBaseY + waterHeight(x, z, t) + BOAT_FREEBOARD;
-    const [dx, dz] = waterSlope(x, z, t);
+    let [dx, dz] = waterSlope(x, z, t);
+    // The waves are sized against the boat's own length, not against a real
+    // lake's, so their slope at a single sampled point can run steep enough
+    // — several waves' worth of tilt stacking at once — to pitch the boat
+    // onto its nose rather than rock it. Capping the tilt this produces
+    // (not the height displacement itself, which is what actually sells the
+    // waves) keeps the boat looking like it's riding a chop instead of
+    // diving into it.
+    const slope = Math.hypot(dx, dz);
+    if (slope > BOAT_MAX_TILT_SLOPE) {
+      const damp = BOAT_MAX_TILT_SLOPE / slope;
+      dx *= damp;
+      dz *= damp;
+    }
     const up = new Vector3(-dx, 1, -dz).normalize();
 
     boat.root.position.set(x, y, z);
