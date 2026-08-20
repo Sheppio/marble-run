@@ -34,6 +34,27 @@ const MAIN_SAIL_COLOUR = Color3.FromHexString("#e8703a");
 const JIB_SAIL_COLOUR = Color3.FromHexString("#3fa77a");
 const MASTHEAD_COLOUR = Color3.FromHexString("#d4453f");
 
+/**
+ * Z positions and beam scale along the hull's length, stern to bow. Shared
+ * between the hull's own extrusion and the deck that caps it, so the two
+ * always taper together instead of the deck needing to be kept in sync by
+ * hand.
+ */
+const DECK_Z = [
+  -HULL_LENGTH / 2,
+  -HULL_LENGTH * 0.275,
+  0,
+  HULL_LENGTH * 0.25,
+  HULL_LENGTH * 0.41,
+  HULL_LENGTH / 2,
+];
+// Close to full beam at the stern, tapering sharply only at the bow — real
+// hull proportions, not a symmetric lozenge pinched at both ends. Never
+// quite zero at the bow tip: a fully degenerate ring of coincident points
+// is exactly the kind of zero-area geometry that renders as a lit speck or
+// a stray normal on some GPUs.
+const DECK_SCALES = [0.85, 0.97, 1.0, 0.9, 0.55, 0.05];
+
 export interface Boat {
   /** Root transform: move and rotate this to pose the whole boat. */
   root: TransformNode;
@@ -89,22 +110,13 @@ function createHull(scene: Scene): Mesh {
     new Vector3(halfBeam, 0, 0),
   ];
 
-  const half = HULL_LENGTH / 2;
-  const path = [-half, -half * 0.55, 0, half * 0.5, half * 0.82, half].map(
-    (z) => new Vector3(0, 0, z),
-  );
-  // Close to full beam at the stern, tapering sharply only at the bow — real
-  // hull proportions, not a symmetric lozenge pinched at both ends. Never
-  // quite zero at the bow tip: a fully degenerate ring of coincident points
-  // is exactly the kind of zero-area geometry that renders as a lit speck or
-  // a stray normal on some GPUs.
-  const scales = [0.85, 0.97, 1.0, 0.9, 0.55, 0.05];
+  const path = DECK_Z.map((z) => new Vector3(0, 0, z));
   const hull = ExtrudeShapeCustom(
     "boat-hull",
     {
       shape,
       path,
-      scaleFunction: (i) => scales[Math.min(i, scales.length - 1)],
+      scaleFunction: (i) => DECK_SCALES[Math.min(i, DECK_SCALES.length - 1)],
       cap: Mesh.CAP_START,
       sideOrientation: Mesh.DOUBLESIDE,
       // The path runs straight along Z, so Path3D needs an explicit normal
@@ -131,11 +143,75 @@ function createHull(scene: Scene): Mesh {
   return hull;
 }
 
+/**
+ * A flat deck capping the hull's open top.
+ *
+ * `createHull`'s shape deliberately doesn't close back across the top — an
+ * extrusion of a closed loop is a rod, not something you can see down into —
+ * but left on its own that makes the hull a bottomless trough from above:
+ * every camera angle that looks down into it sees straight through to the
+ * water. This is a separate flat strip rather than a proper cap on the
+ * extrusion itself, following the same bow-to-stern taper (`DECK_SCALES`,
+ * shared with the hull) so its edge tracks the gunwale instead of a
+ * differently-shaped lid sitting slightly wrong against it.
+ */
+function createDeck(scene: Scene): Mesh {
+  const halfBeam = HULL_BEAM / 2;
+  // Slightly inboard of the hull's own rim, so a thin lip of gunwale shows
+  // all the way round rather than the deck sitting exactly flush with — and
+  // z-fighting against — the hull's top edge.
+  const inset = 0.88;
+  // A hair above the rim for the same reason: coincident geometry z-fights.
+  const y = 0.06;
+
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const uvs: number[] = [];
+  for (let i = 0; i < DECK_Z.length; i++) {
+    const x = halfBeam * DECK_SCALES[i] * inset;
+    positions.push(-x, y, DECK_Z[i], x, y, DECK_Z[i]);
+    normals.push(0, 1, 0, 0, 1, 0);
+    uvs.push(0, i / (DECK_Z.length - 1), 1, i / (DECK_Z.length - 1));
+  }
+  const indices: number[] = [];
+  for (let i = 0; i < DECK_Z.length - 1; i++) {
+    const a = i * 2;
+    const b = i * 2 + 1;
+    const c = (i + 1) * 2;
+    const d = (i + 1) * 2 + 1;
+    indices.push(a, c, b, b, c, d);
+  }
+
+  const mesh = new Mesh("boat-deck", scene);
+  const data = new VertexData();
+  data.positions = positions;
+  data.normals = normals;
+  data.uvs = uvs;
+  data.indices = indices;
+  data.applyToMesh(mesh);
+
+  const material = createSurface(scene, "boat-deck-mat", HULL_COLOUR.scale(0.85), {
+    metallic: 0.0,
+    roughness: 0.8,
+    environmentIntensity: 0.3,
+  });
+  // The winding above is only right when seen from above; rather than chase
+  // that through the taper's sign changes, render both sides so it can't
+  // vanish from the one angle — straight down — this mesh exists for.
+  material.backFaceCulling = false;
+  mesh.material = material;
+  mesh.isPickable = false;
+  return mesh;
+}
+
 export function buildBoat(scene: Scene): Boat {
   const root = new TransformNode("toy-boat", scene);
 
   const hull = createHull(scene);
   hull.parent = root;
+
+  const deck = createDeck(scene);
+  deck.parent = root;
 
   const mastHeight = 11;
   const mast = CreateCylinder(
@@ -180,7 +256,7 @@ export function buildBoat(scene: Scene): Boat {
   return {
     root,
     dispose() {
-      for (const mesh of [hull, mast, masthead, main, jib]) {
+      for (const mesh of [hull, deck, mast, masthead, main, jib]) {
         mesh.material?.dispose();
         mesh.dispose();
       }
