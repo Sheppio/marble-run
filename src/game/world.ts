@@ -68,32 +68,39 @@ const CHEQUER_CELL = 1.0;
  * The ground plane's swell, as three overlapping sine waves at different
  * wavelengths, directions and speeds.
  *
- * One dominant direction rather than three comparable ones, so the surface
- * reads as rolling ridges rather than an "egg carton" of isolated peaks —
- * three waves of similar strength interfere constructively at scattered
- * points and spike upward there instead of anywhere else, which is what a
- * first pass at these numbers produced once the mesh update bug below was
- * fixed and the amplitude was actually reaching the screen: jagged,
- * needle-like mountains, not water. The secondary and tertiary waves here
- * are a fraction of the first one's amplitude, just enough to break up the
- * ridge lines and the sine's own telltale straightness without competing
- * with it for which one shapes the silhouette. Sized against the 16cm toy
- * boat, which is the one thing that actually sits on the water (the marbles
- * ride the track above it) — the dominant wavelength is a few boat-lengths,
- * close enough that the boat visibly rocks and pitches as it crosses one.
+ * Each wave's direction is an arbitrary unit vector rather than one of the
+ * world axes (or their diagonal) — three waves running along x, z and x+z
+ * are only 45 degrees apart and share every multiple of that angle, so the
+ * troughs and crests they cast keep lining back up into the same few spots
+ * as each other every so often, which reads as a repeating tile rather than
+ * an irregular sea. Angles here are well off any of those alignments, and
+ * the wavelengths avoid simple ratios with each other for the same reason —
+ * two periodic patterns with a near-integer wavelength ratio re-align
+ * regularly; ones that don't share a ratio drift in and out of phase with
+ * each other indefinitely, so the combined pattern doesn't repeat within
+ * any span you'd actually see at once.
+ *
+ * One dominant wave rather than three comparable ones, so the surface reads
+ * as rolling ridges rather than an "egg carton" of isolated peaks — three
+ * waves of similar strength interfere constructively at scattered points
+ * and spike upward there instead of anywhere else. The secondary and
+ * tertiary waves are a fraction of the first one's amplitude, just enough
+ * to texture the ridge lines without competing with it for which one shapes
+ * the silhouette. Kept subtle rather than sized boldly against the 16cm toy
+ * boat as an earlier pass did — that read as dramatic rather than as water.
  */
 const WATER_WAVES = [
-  { amplitude: 7, frequency: 0.074, speed: 0.5, axis: "x" },
-  { amplitude: 2.5, frequency: 0.114, speed: -0.4, axis: "z" },
-  { amplitude: 1.2, frequency: 0.19, speed: 0.75, axis: "xz" },
+  { amplitude: 1.75, frequency: 0.074, speed: 0.5, dirX: 0.956, dirZ: 0.292 },
+  { amplitude: 0.625, frequency: 0.117, speed: -0.4, dirX: -0.225, dirZ: 0.974 },
+  { amplitude: 0.3, frequency: 0.193, speed: 0.75, dirX: -0.857, dirZ: -0.515 },
 ] as const;
 
 /** Height of the water surface at a point, in local ground-plane cm. */
 function waterHeight(x: number, z: number, t: number): number {
   let h = 0;
   for (const w of WATER_WAVES) {
-    const phase = w.axis === "x" ? x : w.axis === "z" ? z : x + z;
-    h += w.amplitude * Math.sin(phase * w.frequency + t * w.speed);
+    const phase = (x * w.dirX + z * w.dirZ) * w.frequency + t * w.speed;
+    h += w.amplitude * Math.sin(phase);
   }
   return h;
 }
@@ -107,10 +114,10 @@ function waterSlope(x: number, z: number, t: number): [number, number] {
   let dx = 0;
   let dz = 0;
   for (const w of WATER_WAVES) {
-    const phase = w.axis === "x" ? x : w.axis === "z" ? z : x + z;
-    const slope = w.amplitude * w.frequency * Math.cos(phase * w.frequency + t * w.speed);
-    if (w.axis !== "z") dx += slope;
-    if (w.axis !== "x") dz += slope;
+    const phase = (x * w.dirX + z * w.dirZ) * w.frequency + t * w.speed;
+    const slope = w.amplitude * w.frequency * Math.cos(phase);
+    dx += slope * w.dirX;
+    dz += slope * w.dirZ;
   }
   return [dx, dz];
 }
@@ -130,7 +137,7 @@ function waterSlope(x: number, z: number, t: number): [number, number] {
 const BOAT_ORBIT_RADIUS = 140;
 const BOAT_ANGULAR_SPEED = 0.05;
 /** How high the hull's deck line floats above the flat waterline, in cm. */
-const BOAT_FREEBOARD = 2.2;
+const BOAT_FREEBOARD = 1.1;
 /** Steepest local wave slope the boat's tilt will follow — see `updateBoat`. */
 const BOAT_MAX_TILT_SLOPE = 0.36;
 
