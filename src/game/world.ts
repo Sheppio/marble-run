@@ -27,7 +27,15 @@ import { buildObstacles, frameRotation, type ObstacleSet } from "../track/obstac
 import { hashSeed } from "../core/rng";
 import { createEnvironment, type WorldLighting } from "../render/environment";
 import { applyDetail, createSurface } from "../render/materials";
-import { buildBoat, boatOrientation, HULL_LENGTH, HULL_BEAM, type Boat } from "../render/boat";
+import {
+  buildBoat,
+  boatOrientation,
+  HULL_LENGTH,
+  HULL_BEAM,
+  DEFAULT_SAILS,
+  type Boat,
+  type BoatSails,
+} from "../render/boat";
 import {
   chequerTexture,
   fitChequer,
@@ -153,7 +161,7 @@ function waterSlope(x: number, z: number, t: number): [number, number] {
 }
 
 /**
- * The toy boat's path: a slow circle centred near the middle of the arena.
+ * The toy boats' paths: slow circles centred near the middle of the arena.
  *
  * A track starts out near the arena's rim and spirals inward — see
  * `generateTrack` — so the interior tends to be the most open water going,
@@ -163,9 +171,22 @@ function waterSlope(x: number, z: number, t: number): [number, number] {
  * collision logic for something that is decoration and cannot affect a race
  * either way, and one seed's dodge is the next seed's detour into a clear
  * patch of water for no visible reason.
+ *
+ * A small fleet rather than one boat, each on its own radius and starting
+ * angle so they never cross paths (a shared centre and evenly spread radii
+ * guarantee that) and in a different pair of sail colours so they read as
+ * separate boats at a glance rather than one boat seen three times.
  */
-const BOAT_ORBIT_RADIUS = 140;
-const BOAT_ANGULAR_SPEED = 0.05;
+const BOAT_FLEET: ReadonlyArray<{
+  orbitRadius: number;
+  phase: number;
+  angularSpeed: number;
+  sails: BoatSails;
+}> = [
+  { orbitRadius: 140, phase: 0, angularSpeed: 0.05, sails: DEFAULT_SAILS },
+  { orbitRadius: 100, phase: 2.35, angularSpeed: 0.042, sails: { main: Color3.FromHexString("#4a90d9"), jib: Color3.FromHexString("#f2c14e") } },
+  { orbitRadius: 178, phase: 4.55, angularSpeed: 0.058, sails: { main: Color3.FromHexString("#c0392b"), jib: Color3.FromHexString("#8e6fc9") } },
+];
 /** How high the hull's deck line floats above the flat waterline, in cm. */
 const BOAT_FREEBOARD = 1.1;
 /** Steepest local wave slope the boat's tilt will follow — see `updateBoat`. */
@@ -288,7 +309,7 @@ export class World {
   private waterTime = 0;
   /** World Y the water plane's own local (unrippled) surface sits at. */
   private waterBaseY = 0;
-  private boat: Boat | null = null;
+  private boats: Boat[] = [];
   private boatTime = 0;
 
   constructor(options: WorldOptions) {
@@ -1040,66 +1061,70 @@ export class World {
     this.scene.fogEnd = 3200;
 
     // Purely for the look of it — see `buildBoat`'s own comment for why.
-    this.boat = buildBoat(this.scene);
+    this.boats = BOAT_FLEET.map((config) => buildBoat(this.scene, config.sails));
   }
 
   /**
-   * Sails the toy boat slowly round its circular path, riding the current
-   * water height and slope at wherever it currently is rather than floating
-   * dead flat through the swell.
+   * Sails each toy boat slowly round its own circular path, riding the
+   * current water height and slope at wherever it currently is rather than
+   * floating dead flat through the swell.
    */
   private updateBoat(dt: number): void {
-    const boat = this.boat;
-    if (!boat) return;
+    if (this.boats.length === 0) return;
     this.boatTime += dt;
     const t = this.boatTime;
 
-    const angle = t * BOAT_ANGULAR_SPEED;
-    const x = Math.cos(angle) * BOAT_ORBIT_RADIUS;
-    const z = Math.sin(angle) * BOAT_ORBIT_RADIUS;
-    // Tangent to the circle — the direction of travel, for heading.
-    const heading = new Vector3(-Math.sin(angle), 0, Math.cos(angle));
-    const right = new Vector3(heading.z, 0, -heading.x);
+    for (let i = 0; i < this.boats.length; i++) {
+      const boat = this.boats[i];
+      const config = BOAT_FLEET[i];
+      const angle = config.phase + t * config.angularSpeed;
+      const x = Math.cos(angle) * config.orbitRadius;
+      const z = Math.sin(angle) * config.orbitRadius;
+      // Tangent to the circle — the direction of travel, for heading.
+      const heading = new Vector3(-Math.sin(angle), 0, Math.cos(angle));
+      const right = new Vector3(heading.z, 0, -heading.x);
 
-    // Sampled at the hull's own bow/stern/port/starboard rather than once at
-    // its centre: the waves are short enough relative to the hull now that a
-    // single point can sit in a trough while the actual surface right under
-    // the bow or a gunwale is a crest, and the rigid hull would then render
-    // buried in water that, at its own single sample point, claims to be
-    // lower than it is.
-    const halfLength = HULL_LENGTH / 2;
-    const halfBeam = HULL_BEAM / 2;
-    const bowH = waterHeight(x + heading.x * halfLength, z + heading.z * halfLength, t);
-    const sternH = waterHeight(x - heading.x * halfLength, z - heading.z * halfLength, t);
-    const starboardH = waterHeight(x + right.x * halfBeam, z + right.z * halfBeam, t);
-    const portH = waterHeight(x - right.x * halfBeam, z - right.z * halfBeam, t);
-    const centreH = (bowH + sternH + starboardH + portH) / 4;
-    const y = this.waterBaseY + centreH + BOAT_FREEBOARD;
+      // Sampled at the hull's own bow/stern/port/starboard rather than once
+      // at its centre: the waves are short enough relative to the hull now
+      // that a single point can sit in a trough while the actual surface
+      // right under the bow or a gunwale is a crest, and the rigid hull
+      // would then render buried in water that, at its own single sample
+      // point, claims to be lower than it is.
+      const halfLength = HULL_LENGTH / 2;
+      const halfBeam = HULL_BEAM / 2;
+      const bowH = waterHeight(x + heading.x * halfLength, z + heading.z * halfLength, t);
+      const sternH = waterHeight(x - heading.x * halfLength, z - heading.z * halfLength, t);
+      const starboardH = waterHeight(x + right.x * halfBeam, z + right.z * halfBeam, t);
+      const portH = waterHeight(x - right.x * halfBeam, z - right.z * halfBeam, t);
+      const centreH = (bowH + sternH + starboardH + portH) / 4;
+      const y = this.waterBaseY + centreH + BOAT_FREEBOARD;
 
-    // The local gradient rebuilt from those same four points (a directional
-    // derivative along heading and along right, which together span the
-    // horizontal plane) rather than from `waterSlope`'s single-point
-    // derivative — consistent with the height sample above, and averaged
-    // over the hull's own footprint instead of one instant of the curve.
-    let dx = ((bowH - sternH) / HULL_LENGTH) * heading.x + ((starboardH - portH) / HULL_BEAM) * right.x;
-    let dz = ((bowH - sternH) / HULL_LENGTH) * heading.z + ((starboardH - portH) / HULL_BEAM) * right.z;
-    // The waves are sized against the boat's own length, not against a real
-    // lake's, so their slope at a single sampled point can run steep enough
-    // — several waves' worth of tilt stacking at once — to pitch the boat
-    // onto its nose rather than rock it. Capping the tilt this produces
-    // (not the height displacement itself, which is what actually sells the
-    // waves) keeps the boat looking like it's riding a chop instead of
-    // diving into it.
-    const slope = Math.hypot(dx, dz);
-    if (slope > BOAT_MAX_TILT_SLOPE) {
-      const damp = BOAT_MAX_TILT_SLOPE / slope;
-      dx *= damp;
-      dz *= damp;
+      // The local gradient rebuilt from those same four points (a
+      // directional derivative along heading and along right, which
+      // together span the horizontal plane) rather than from
+      // `waterSlope`'s single-point derivative — consistent with the
+      // height sample above, and averaged over the hull's own footprint
+      // instead of one instant of the curve.
+      let dx = ((bowH - sternH) / HULL_LENGTH) * heading.x + ((starboardH - portH) / HULL_BEAM) * right.x;
+      let dz = ((bowH - sternH) / HULL_LENGTH) * heading.z + ((starboardH - portH) / HULL_BEAM) * right.z;
+      // The waves are sized against the boat's own length, not against a
+      // real lake's, so their slope at a single sampled point can run
+      // steep enough — several waves' worth of tilt stacking at once — to
+      // pitch the boat onto its nose rather than rock it. Capping the tilt
+      // this produces (not the height displacement itself, which is what
+      // actually sells the waves) keeps the boat looking like it's riding
+      // a chop instead of diving into it.
+      const slope = Math.hypot(dx, dz);
+      if (slope > BOAT_MAX_TILT_SLOPE) {
+        const damp = BOAT_MAX_TILT_SLOPE / slope;
+        dx *= damp;
+        dz *= damp;
+      }
+      const up = new Vector3(-dx, 1, -dz).normalize();
+
+      boat.root.position.set(x, y, z);
+      boat.root.rotationQuaternion = boatOrientation(heading, up);
     }
-    const up = new Vector3(-dx, 1, -dz).normalize();
-
-    boat.root.position.set(x, y, z);
-    boat.root.rotationQuaternion = boatOrientation(heading, up);
   }
 
   /**
@@ -1306,8 +1331,8 @@ export class World {
     }
     this.decor.length = 0;
     this.waterMesh = null;
-    this.boat?.dispose();
-    this.boat = null;
+    for (const boat of this.boats) boat.dispose();
+    this.boats = [];
     this.scene.dispose();
     this.engine.dispose();
   }

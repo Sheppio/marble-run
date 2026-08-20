@@ -204,7 +204,15 @@ function createDeck(scene: Scene): Mesh {
   return mesh;
 }
 
-export function buildBoat(scene: Scene): Boat {
+export interface BoatSails {
+  main: Color3;
+  jib: Color3;
+}
+
+/** The original pair, used when a caller doesn't want a different one. */
+export const DEFAULT_SAILS: BoatSails = { main: MAIN_SAIL_COLOUR, jib: JIB_SAIL_COLOUR };
+
+export function buildBoat(scene: Scene, sails: BoatSails = DEFAULT_SAILS): Boat {
   const root = new TransformNode("toy-boat", scene);
 
   const hull = createHull(scene);
@@ -243,12 +251,12 @@ export function buildBoat(scene: Scene): Boat {
   // two-sail silhouette every reference for this had in common — and both
   // are fanned out a little from dead fore-and-aft, as if actually holding a
   // breath of wind rather than hanging limp against the mast.
-  const main = createSail("boat-main-sail", 5.5, mastHeight * 0.82, MAIN_SAIL_COLOUR, scene);
+  const main = createSail("boat-main-sail", 5.5, mastHeight * 0.82, sails.main, scene);
   main.rotation.y = Math.PI + 0.16;
   main.position.set(0, 0.4, -0.05);
   main.parent = root;
 
-  const jib = createSail("boat-jib-sail", 3.4, mastHeight * 0.6, JIB_SAIL_COLOUR, scene);
+  const jib = createSail("boat-jib-sail", 3.4, mastHeight * 0.6, sails.jib, scene);
   jib.rotation.y = -0.22;
   jib.position.set(0, 0.4, 0.05);
   jib.parent = root;

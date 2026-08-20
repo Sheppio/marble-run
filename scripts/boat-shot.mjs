@@ -54,7 +54,7 @@ try {
 
   const found = await page.evaluate(() => {
     const world = window.__world;
-    const boat = world.boat;
+    const boat = world.boats[0];
     if (!boat) return null;
     const p = boat.root.position;
     return { x: p.x, y: p.y, z: p.z };
@@ -69,7 +69,7 @@ try {
     await page.evaluate(
       ({ back, right, up }) => {
         const world = window.__world;
-        const boat = world.boat;
+        const boat = world.boats[0];
         const p = boat.root.position;
         // Recompute the boat's own heading from its orbit position (same
         // formula updateBoat uses), so the camera offset is relative to
