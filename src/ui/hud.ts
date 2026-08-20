@@ -190,7 +190,7 @@ export class Hud {
       row.detail.textContent = marble.finished
         ? formatTime(marble.finishTime)
         : standing.place === 1
-          ? "leader"
+          ? ""
           : `−${formatDistance(standing.gapToLeader)}`;
 
       // Ordering rows by CSS `order` avoids re-parenting nodes every frame,

@@ -559,12 +559,6 @@ body {
   font-size: 0.66rem;
 }
 
-/* The gap figure sits right after the name here rather than being pushed to
-   the far edge, so the row is only as wide as its contents. */
-.leaderboard-column .row-detail {
-  margin-left: 0.1rem;
-}
-
 .leaderboard-column .row-detail {
   font-size: 0.56rem;
 }
@@ -631,6 +625,32 @@ body {
   color: var(--text-dim);
   width: 1.1rem;
   text-align: center;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* Name and gap figure sit at different font sizes, and a browser's default
+   line-height leaves each one a different amount of leading above and below
+   its glyphs — so even though flexbox centres every row's items on the same
+   axis, the text inside them looked centred on its box, not on its own
+   letterforms, and the two drifted apart. Pinning both to the same
+   tight line-height removes the mismatched leading. */
+.row-name,
+.row-detail {
+  line-height: 1;
+}
+
+.row-body {
+  display: flex;
+  align-items: center;
+}
+
+.row-detail {
+  /* Flush against the row's own right edge regardless of how wide the name
+     to its left happens to be, so the figures form one straight edge down
+     the column instead of trailing each name at a different point. */
+  margin-left: auto;
+  text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
