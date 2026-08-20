@@ -95,6 +95,31 @@ const WATER_WAVES = [
   { amplitude: 0.3, frequency: 0.193, speed: 0.75, dirX: -0.857, dirZ: -0.515 },
 ] as const;
 
+/**
+ * Radius, in cm from the arena centre, within which the waves run at full
+ * strength — generous over the arena itself (radius 260) and the boat's own
+ * orbit (radius 140).
+ */
+const WATER_FALLOFF_INNER = 480;
+/**
+ * Radius the waves have faded to nothing by. Short of the animated ground
+ * plane's own 800cm half-width on purpose, so there's a dead-flat margin
+ * between where the waves end and where the plane itself does — the flat
+ * horizon plane built alongside it (see `buildFloor`) starts from exactly
+ * that same flatness, so the seam between the two is never a place either
+ * one is actually moving.
+ */
+const WATER_FALLOFF_OUTER = 760;
+
+/** 1 at the centre, smoothly down to 0 by `WATER_FALLOFF_OUTER`. */
+function waterFalloff(x: number, z: number): number {
+  const r = Math.hypot(x, z);
+  if (r <= WATER_FALLOFF_INNER) return 1;
+  if (r >= WATER_FALLOFF_OUTER) return 0;
+  const t = (r - WATER_FALLOFF_INNER) / (WATER_FALLOFF_OUTER - WATER_FALLOFF_INNER);
+  return 1 - t * t * (3 - 2 * t);
+}
+
 /** Height of the water surface at a point, in local ground-plane cm. */
 function waterHeight(x: number, z: number, t: number): number {
   let h = 0;
@@ -102,20 +127,26 @@ function waterHeight(x: number, z: number, t: number): number {
     const phase = (x * w.dirX + z * w.dirZ) * w.frequency + t * w.speed;
     h += w.amplitude * Math.sin(phase);
   }
-  return h;
+  return h * waterFalloff(x, z);
 }
 
 /**
  * The surface's slope at a point, as (dHeight/dx, dHeight/dz) — the analytic
  * derivative of `waterHeight`, used to build a normal without recomputing one
  * from the displaced mesh each frame.
+ *
+ * Approximate near the falloff band: this scales the waves' own slope by the
+ * same radial falloff `waterHeight` uses but skips the (small, and only ever
+ * relevant in a band that is fading to flat anyway) extra term from the
+ * falloff's own gradient.
  */
 function waterSlope(x: number, z: number, t: number): [number, number] {
   let dx = 0;
   let dz = 0;
+  const falloff = waterFalloff(x, z);
   for (const w of WATER_WAVES) {
     const phase = (x * w.dirX + z * w.dirZ) * w.frequency + t * w.speed;
-    const slope = w.amplitude * w.frequency * Math.cos(phase);
+    const slope = w.amplitude * w.frequency * Math.cos(phase) * falloff;
     dx += slope * w.dirX;
     dz += slope * w.dirZ;
   }
@@ -988,6 +1019,37 @@ export class World {
     // isn't worth a second flag for one mesh.
     this.waterMesh = floor;
     this.decor.push(floor);
+
+    // A second, much bigger, flat plane surrounding the first, so the water
+    // reaches convincingly to the horizon from any camera angle instead of
+    // ending at a visible edge. Unsubdivided rather than another wavy mesh:
+    // by the time a camera could see this far out, the waves have already
+    // faded to nothing (`WATER_FALLOFF_OUTER`, comfortably inside this
+    // plane's own inner edge), so there's nothing here that needs
+    // displacing, and it shares the inner plane's exact material so the
+    // seam between "waves fading out" and "no waves" is also a seam between
+    // two patches of identical colour.
+    const horizon = CreateGround(
+      "floor-horizon",
+      { width: 9000, height: 9000, subdivisions: 2 },
+      this.scene,
+    );
+    horizon.position.y = floor.position.y;
+    horizon.material = floorMaterial;
+    horizon.receiveShadows = false;
+    horizon.isPickable = false;
+    this.decor.push(horizon);
+
+    // Fog, colour-matched to the sky's own horizon band, fading in well
+    // short of the camera's 4000cm draw distance. Belt and braces alongside
+    // the horizon plane above: it hides the far plane's own silhouette
+    // against the sky (a dead flat edge reads as a horizon line even when
+    // its colour matches), and it sells depth on anything else seen at
+    // range, which a scene this size otherwise never has.
+    this.scene.fogMode = Scene.FOGMODE_LINEAR;
+    this.scene.fogColor = this.theme.sky.horizon;
+    this.scene.fogStart = 900;
+    this.scene.fogEnd = 3200;
 
     // Purely for the look of it — see `buildBoat`'s own comment for why.
     this.boat = buildBoat(this.scene);
