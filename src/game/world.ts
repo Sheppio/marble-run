@@ -27,7 +27,7 @@ import { buildObstacles, frameRotation, type ObstacleSet } from "../track/obstac
 import { hashSeed } from "../core/rng";
 import { createEnvironment, type WorldLighting } from "../render/environment";
 import { applyDetail, createSurface } from "../render/materials";
-import { buildBoat, boatOrientation, type Boat } from "../render/boat";
+import { buildBoat, boatOrientation, HULL_LENGTH, HULL_BEAM, type Boat } from "../render/boat";
 import {
   chequerTexture,
   fitChequer,
@@ -68,23 +68,24 @@ const CHEQUER_CELL = 1.0;
  * The ground plane's swell, as three overlapping sine waves at different
  * wavelengths, directions and speeds.
  *
- * Three rather than one so the surface never lines up into visibly straight,
- * repeating ridges — the thing that would give away "it's a sine wave"
- * fastest. Sized against the 16cm toy boat, which is the one thing that
- * actually sits on the water (the marbles ride the track above it) — a
- * previous pass sized these against the plane's own 1600cm span instead and
- * ended up with a ~2.2m dominant wavelength, more than ten boat-lengths
- * across. At that ratio the boat barely tilts as it crosses one, and the
- * whole sheet reads as a slow, flat lean rather than a surface with waves on
- * it. Wavelengths here run roughly one to four boat-lengths and amplitudes
- * are large enough that the boat visibly rocks and pitches as it rides them,
- * which is what "waves" needs to look like at this scale even though it's
- * well past what a real lake's chop would be relative to its own ripples.
+ * One dominant direction rather than three comparable ones, so the surface
+ * reads as rolling ridges rather than an "egg carton" of isolated peaks —
+ * three waves of similar strength interfere constructively at scattered
+ * points and spike upward there instead of anywhere else, which is what a
+ * first pass at these numbers produced once the mesh update bug below was
+ * fixed and the amplitude was actually reaching the screen: jagged,
+ * needle-like mountains, not water. The secondary and tertiary waves here
+ * are a fraction of the first one's amplitude, just enough to break up the
+ * ridge lines and the sine's own telltale straightness without competing
+ * with it for which one shapes the silhouette. Sized against the 16cm toy
+ * boat, which is the one thing that actually sits on the water (the marbles
+ * ride the track above it) — the dominant wavelength is a few boat-lengths,
+ * close enough that the boat visibly rocks and pitches as it crosses one.
  */
 const WATER_WAVES = [
-  { amplitude: 16, frequency: 0.048, speed: 0.6, axis: "x" },
-  { amplitude: 9, frequency: 0.074, speed: -0.45, axis: "z" },
-  { amplitude: 5, frequency: 0.114, speed: 0.8, axis: "xz" },
+  { amplitude: 7, frequency: 0.074, speed: 0.5, axis: "x" },
+  { amplitude: 2.5, frequency: 0.114, speed: -0.4, axis: "z" },
+  { amplitude: 1.2, frequency: 0.19, speed: 0.75, axis: "xz" },
 ] as const;
 
 /** Height of the water surface at a point, in local ground-plane cm. */
@@ -129,7 +130,7 @@ function waterSlope(x: number, z: number, t: number): [number, number] {
 const BOAT_ORBIT_RADIUS = 140;
 const BOAT_ANGULAR_SPEED = 0.05;
 /** How high the hull's deck line floats above the flat waterline, in cm. */
-const BOAT_FREEBOARD = 1.1;
+const BOAT_FREEBOARD = 2.2;
 /** Steepest local wave slope the boat's tilt will follow — see `updateBoat`. */
 const BOAT_MAX_TILT_SLOPE = 0.36;
 
@@ -925,8 +926,8 @@ export class World {
     for (const frame of this.geometry.frames) lowest = Math.min(lowest, frame.position.y);
 
     // Subdivided rather than the single quad the grass version used: the
-    // waves need vertices to displace. 80 works out to about 20cm a cell,
-    // close to four samples across the shortest wave's own ~55cm wavelength
+    // waves need vertices to displace. 110 works out to about 14.5cm a cell,
+    // close to four samples across the shortest wave's own ~48cm wavelength
     // — coarser than that and the displacement itself starts faceting
     // rather than curving, on top of the per-vertex analytic normals that
     // keep the *shading* smooth however coarse the mesh is. That resolution
@@ -937,10 +938,16 @@ export class World {
     // a coarser (and by the same maths, flatter-looking) sea instead, rather
     // than paying a frame cost that scales with a detail level the tier
     // exists to turn down.
-    const subdivisions = this.quality.tier === "high" ? 80 : this.quality.tier === "medium" ? 56 : 30;
+    const subdivisions = this.quality.tier === "high" ? 110 : this.quality.tier === "medium" ? 64 : 30;
     const floor = CreateGround(
       "floor",
-      { width: 1600, height: 1600, subdivisions },
+      // Without `updatable: true` a mesh's vertex buffer is uploaded once
+      // and never again — `updateWater`'s per-frame updateVerticesData calls
+      // were mutating the CPU-side array in place (the same array object
+      // getVerticesData had handed back) but never reaching the GPU, so the
+      // rendered surface stayed exactly as flat as the moment it was built
+      // no matter how the wave function above was tuned.
+      { width: 1600, height: 1600, subdivisions, updatable: true },
       this.scene,
     );
     floor.position.y = lowest - TABLE_DROP;
@@ -995,9 +1002,30 @@ export class World {
     const z = Math.sin(angle) * BOAT_ORBIT_RADIUS;
     // Tangent to the circle — the direction of travel, for heading.
     const heading = new Vector3(-Math.sin(angle), 0, Math.cos(angle));
+    const right = new Vector3(heading.z, 0, -heading.x);
 
-    const y = this.waterBaseY + waterHeight(x, z, t) + BOAT_FREEBOARD;
-    let [dx, dz] = waterSlope(x, z, t);
+    // Sampled at the hull's own bow/stern/port/starboard rather than once at
+    // its centre: the waves are short enough relative to the hull now that a
+    // single point can sit in a trough while the actual surface right under
+    // the bow or a gunwale is a crest, and the rigid hull would then render
+    // buried in water that, at its own single sample point, claims to be
+    // lower than it is.
+    const halfLength = HULL_LENGTH / 2;
+    const halfBeam = HULL_BEAM / 2;
+    const bowH = waterHeight(x + heading.x * halfLength, z + heading.z * halfLength, t);
+    const sternH = waterHeight(x - heading.x * halfLength, z - heading.z * halfLength, t);
+    const starboardH = waterHeight(x + right.x * halfBeam, z + right.z * halfBeam, t);
+    const portH = waterHeight(x - right.x * halfBeam, z - right.z * halfBeam, t);
+    const centreH = (bowH + sternH + starboardH + portH) / 4;
+    const y = this.waterBaseY + centreH + BOAT_FREEBOARD;
+
+    // The local gradient rebuilt from those same four points (a directional
+    // derivative along heading and along right, which together span the
+    // horizontal plane) rather than from `waterSlope`'s single-point
+    // derivative — consistent with the height sample above, and averaged
+    // over the hull's own footprint instead of one instant of the curve.
+    let dx = ((bowH - sternH) / HULL_LENGTH) * heading.x + ((starboardH - portH) / HULL_BEAM) * right.x;
+    let dz = ((bowH - sternH) / HULL_LENGTH) * heading.z + ((starboardH - portH) / HULL_BEAM) * right.z;
     // The waves are sized against the boat's own length, not against a real
     // lake's, so their slope at a single sampled point can run steep enough
     // — several waves' worth of tilt stacking at once — to pitch the boat

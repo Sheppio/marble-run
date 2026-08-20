@@ -24,8 +24,8 @@ import { createSurface } from "./materials";
  */
 
 /** Overall length of the hull, in cm — small against the track, big against a marble. */
-const HULL_LENGTH = 16;
-const HULL_BEAM = 6;
+export const HULL_LENGTH = 16;
+export const HULL_BEAM = 6;
 const HULL_DEPTH = 2.4;
 
 const HULL_COLOUR = Color3.FromHexString("#d8c39a");
