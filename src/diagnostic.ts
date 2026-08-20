@@ -626,6 +626,29 @@ async function findGridPinField(
 }
 
 /**
+ * Checks, across many seeds, that every track has at least one pin field —
+ * the guarantee `placeObstacles`'s fallback insertion exists to give — and
+ * reports how many it typically gets.
+ */
+async function checkPinCoverage(
+  prefix: string,
+  seeds: number,
+): Promise<{ seeds: number; withoutPins: string[]; totalPinFields: number; meanPinFields: number }> {
+  const withoutPins: string[] = [];
+  let totalPinFields = 0;
+
+  for (let i = 0; i < seeds; i++) {
+    const seed = `${prefix}-${i}`;
+    const plan = generateTrack(seed);
+    const count = plan.obstacles.filter((o) => o.kind === "pins").length;
+    totalPinFields += count;
+    if (count === 0) withoutPins.push(seed);
+  }
+
+  return { seeds, withoutPins, totalPinFields, meanPinFields: totalPinFields / seeds };
+}
+
+/**
  * Checks, across many seeds, whether a marble can still get down the side of
  * a grid pin field without touching a pin — the thing `pinRowOffsets`'s
  * wall-hugging pins exist to prevent.
@@ -686,6 +709,7 @@ declare global {
     baffleQueueTest: typeof baffleQueueTest;
     findGridPinField: typeof findGridPinField;
     checkPinWallGaps: typeof checkPinWallGaps;
+    checkPinCoverage: typeof checkPinCoverage;
   }
 }
 
@@ -694,5 +718,6 @@ window.runSeed = runSeed;
 window.restTest = restTest;
 window.basinTest = basinTest;
 window.baffleQueueTest = baffleQueueTest;
+window.checkPinCoverage = checkPinCoverage;
 window.findGridPinField = findGridPinField;
 window.checkPinWallGaps = checkPinWallGaps;

@@ -706,11 +706,13 @@ function placeObstacles(
     const weights = OBSTACLE_KINDS.map((kind) => {
       switch (kind) {
         case "pins":
-          // Only worth placing where the channel is genuinely wide. In a
-          // standard-width channel only one pin fits per row once every gap is
-          // kept marble-width, so a "triangle" collapses into a straight line
-          // of pins down the middle, which marbles simply flow past.
-          return roomy > 1.7 ? 5.0 : 0;
+          // Only worth placing where the channel has some real width to it.
+          // Below this a "triangle" collapses into a single staggered line of
+          // pins down the middle rather than a proper field, so the bar stays
+          // high enough to mostly avoid that — but pins are the best obstacle
+          // in the game at actually shuffling the order, so they're weighted
+          // well above everything else once they clear it.
+          return roomy > 1.5 ? 7.0 : 0;
         case "wedge":
           return straightness * 1.6 + 0.4;
         case "baffles":
@@ -732,6 +734,30 @@ function placeObstacles(
     }
 
     index += minSpacing + rng.int(0, 55);
+  }
+
+  // Pins are weighted heavily above but are still only ever chosen where the
+  // channel is wide enough, so an unlucky seed — a track that never widens
+  // enough, or one that widens in exactly the wrong places relative to where
+  // the sweep happened to land — can come out with none at all. They're the
+  // one obstacle that reliably shuffles the field rather than just slowing
+  // it down together, so every track gets at least one: if the loop above
+  // didn't place one, find the widest still-unblocked point going and put
+  // one there directly, however wide that turns out to be.
+  if (!obstacles.some((obstacle) => obstacle.kind === "pins")) {
+    let bestIndex = -1;
+    let bestWidth = -Infinity;
+    for (let i = startIndex + 20; i < finishIndex - 20; i++) {
+      if (blocked[i]) continue;
+      if (widths[i] > bestWidth) {
+        bestWidth = widths[i];
+        bestIndex = i;
+      }
+    }
+    if (bestIndex >= 0) {
+      obstacles.push({ kind: "pins", index: bestIndex, params: rollObstacleParams(rng, "pins") });
+      obstacles.sort((a, b) => a.index - b.index);
+    }
   }
 
   return obstacles;
