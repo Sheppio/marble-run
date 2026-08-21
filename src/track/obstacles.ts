@@ -16,14 +16,22 @@ import type { Theme } from "../render/theme";
 /**
  * Obstacles.
  *
- * All of them are static: fixed geometry bolted to the track, exactly as a
- * wooden marble run has. Nothing spins, swings or opens on a timer.
+ * All of them are static, physically: fixed collision geometry bolted to
+ * the track, exactly as a wooden marble run has. Baffles and wedges are the
+ * exception only in how they *look* — their visible mesh swings on a slow
+ * ease-in-ease-out cycle, but the collider a marble actually feels stays
+ * fixed at the swing's own maximum extent.
  *
- * That is partly taste and partly physics. A kinematic obstacle pushes with
- * effectively infinite force, so it can pin a marble against a wall in a way
- * nothing recovers from; and at these speeds a marble carries so little
- * momentum that a moving part tends to stop it dead rather than deflect it.
- * Static shapes only ever redirect, which is what makes a run fun to watch.
+ * That split is deliberate, not an oversight. A kinematic collider pushes
+ * with effectively infinite force, so it can pin a marble against a wall in
+ * a way nothing recovers from, and at these speeds a marble carries so
+ * little momentum that a moving part tends to stop it dead rather than
+ * deflect it. This was tried for real — a genuinely moving collider, plus a
+ * contact-based "back off early if something's stuck" safeguard — and
+ * measured directly against the tuning harness: 100% finish rate dropped to
+ * 68–78% depending on the exact safeguard, and no variant tried closed the
+ * gap. The mesh keeps the motion the obstacle was asked for; the collider
+ * keeps the finish rate the game already had.
  *
  * Layouts are regular — bowling-pin triangles, square grids, evenly spaced
  * baffles — rather than randomly scattered. A regular pattern reads as
@@ -36,6 +44,43 @@ export interface ForceZone {
   to: number;
   /** Force in world space, applied to any marble inside the range. */
   force(frame: TrackFrame, velocity: Vector3): Vector3;
+}
+
+/**
+ * One obstacle mesh that swings between `minAngle` and `maxAngle` on a
+ * repeating ease-in-ease-out cycle, purely visually — see the module
+ * comment for why the collider a marble actually touches doesn't move with
+ * it. Position and pivot are fixed at build time (via `Mesh.setPivotPoint`),
+ * so `rotationAt` is the whole of what changes frame to frame.
+ */
+interface Mover {
+  mesh: Mesh;
+  rotationAt: (angle: number) => Quaternion;
+  minAngle: number;
+  maxAngle: number;
+  /** Full swing-and-return cycle length, in seconds. */
+  period: number;
+}
+
+/** How long one full swing-and-return takes for an oscillating obstacle. */
+const OSCILLATION_PERIOD = 4;
+
+/**
+ * The current angle for a mover at a given moment, easing between its two
+ * extremes.
+ *
+ * A raised cosine rather than a hand-built ease-in/ease-out pair: its
+ * derivative is exactly zero at both ends of the swing, which is the whole
+ * of what "ease in, ease out" means for a cycle that has to join back up
+ * with itself, and doing it as one closed-form curve avoids the seam a
+ * two-piece easing would need stitching at each extreme. Starts at
+ * `maxAngle` (t=0 gives cos=1), matching the angle the obstacle used to
+ * just sit at permanently before it started moving.
+ */
+function oscillate(simTime: number, mover: Pick<Mover, "minAngle" | "maxAngle" | "period">): number {
+  const mid = (mover.maxAngle + mover.minAngle) / 2;
+  const amplitude = (mover.maxAngle - mover.minAngle) / 2;
+  return mid + amplitude * Math.cos((2 * Math.PI * simTime) / mover.period);
 }
 
 export interface ObstacleSet {
@@ -377,6 +422,38 @@ export function buildObstacles(
     shadowCasters.push(merged);
   };
 
+  const movers: Mover[] = [];
+
+  /**
+   * Commits a single mesh as its own (ordinary, unmoving) static body —
+   * unlike `commit`, never merged with anything else, because a mover needs
+   * its own transform to swing independently of whatever else is nearby.
+   * The mesh's `rotationQuaternion` is expected to already be set to
+   * `maxAngle` before this runs: that's the pose the collider is built
+   * from and then keeps for good, per the module comment above, however
+   * the mesh itself goes on to animate.
+   */
+  const commitMover = (
+    mesh: Mesh,
+    material: PBRMaterial,
+    physics: { restitution: number; friction: number },
+    rotationAt: (angle: number) => Quaternion,
+    minAngle: number,
+    maxAngle: number,
+    period: number,
+  ) => {
+    mesh.material = material;
+    const aggregate = new PhysicsAggregate(
+      mesh,
+      PhysicsShapeType.MESH,
+      { mass: 0, ...physics },
+      scene,
+    );
+    statics.push(aggregate);
+    shadowCasters.push(mesh);
+    movers.push({ mesh, rotationAt, minAngle, maxAngle, period });
+  };
+
   for (const spec of specs) {
     const frame = track(spec.index);
     const p = spec.params;
@@ -452,6 +529,17 @@ export function buildObstacles(
         // Short walls from alternating sides, so the run has to weave. Each
         // one leaves a clear lane past its tip, and is angled downstream so a
         // marble is deflected along it rather than stopped by it.
+        //
+        // Each swings on its own hinge — planted at the point where its root
+        // meets the wall, so the tip is what sweeps — between `lean` (its
+        // original, permanently-fixed angle) and half of that, easing in and
+        // out. The hinge is what `lean` on its own no longer needs to
+        // reproduce; that's carried by each baffle's own pivot instead. Kept
+        // as individual bodies rather than merged into one like every other
+        // static obstacle here, because a merged mesh has one shared
+        // transform and these need to swing about their own separate hinges
+        // even though (per the tuning behind `OSCILLATION_PERIOD`) they all
+        // swing in step.
         const count = Math.round(p.count);
         // Spaced out, so the field has room to re-form between them.
         const spacing = 8.0;
@@ -461,7 +549,6 @@ export function buildObstacles(
 
         const lean = baffleLean();
         const reachFactor = baffleReach();
-        const parts: Mesh[] = [];
         for (let i = 0; i < count; i++) {
           const f = track(spec.index - ((count - 1) * spacing) / 2 + i * spacing);
           const side = i % 2 === 0 ? -1 : 1;
@@ -485,25 +572,55 @@ export function buildObstacles(
           // Held under the shell thickness so the root stops inside the wall
           // rather than breaking out of the far side of it.
           const embed = Math.min(TRACK_CONSTANTS.shellThickness * 0.85, 1.0);
-          const baffle = CreateBox(
-            "baffle",
-            { width: reach + embed, height, depth: thickness },
-            scene,
-          );
+          const width = reach + embed;
+          const halfWidth = width / 2;
+          const baffle = CreateBox("baffle", { width, height, depth: thickness }, scene);
+
           // Angled to present a guiding face to oncoming marbles. The lean is
           // measured, not assumed: leaning it the other way was tried and made
           // things markedly worse, roughly doubling the number of marbles that
           // came to rest against one.
-          baffle.rotationQuaternion = Quaternion.RotationAxis(
-            new Vector3(0, 1, 0),
-            side * lean,
-          ).multiply(frameRotation(f));
-          baffle.position = f.position
+          const baseRotation = frameRotation(f);
+          const rotationAt = (angle: number) =>
+            Quaternion.RotationAxis(Vector3.Up(), side * angle).multiply(baseRotation);
+
+          // The root end — local +X, before any rotation — is the hinge. Its
+          // *world* position isn't simply "the wall, plus embed": the whole
+          // box is already leaned by `lean`, so that corner has also swung
+          // sideways along the track by an amount that depends on lean too.
+          // Rather than re-derive that trigonometry by hand, ask Babylon for
+          // it directly: rotate the local corner offset by the exact
+          // rotation the box is being built with, and add it to the exact
+          // centroid position the box would otherwise sit at — which is
+          // guaranteed to land on the true corner, at any lean angle,
+          // because it's the same maths `rotationQuaternion` itself uses.
+          const pivotLocal = new Vector3(halfWidth, 0, 0);
+          const centroid = f.position
             .add(f.right.scale(side * (f.width - reach / 2 + embed / 2)))
             .add(f.up.scale(height / 2));
-          parts.push(baffle);
+          const worldRoot = centroid.add(
+            Vector3.TransformNormal(pivotLocal, rotationAt(lean).toRotationMatrix(new Matrix())),
+          );
+
+          // `setPivotPoint` moves the centre of rotation to that corner
+          // without moving the mesh: position still places the *original*
+          // local origin, so it has to move by the same local offset to
+          // compensate, or the baffle would jump the moment the pivot
+          // changed.
+          baffle.setPivotPoint(pivotLocal);
+          baffle.position = worldRoot.subtract(pivotLocal);
+          baffle.rotationQuaternion = rotationAt(lean);
+
+          commitMover(
+            baffle,
+            materials.rubber,
+            { restitution: 0.25, friction: baffleFriction() },
+            rotationAt,
+            lean / 2,
+            lean,
+            OSCILLATION_PERIOD,
+          );
         }
-        commit(parts, materials.rubber, { restitution: 0.25, friction: baffleFriction() });
         break;
       }
 
@@ -557,10 +674,13 @@ export function buildObstacles(
   }
 
   return {
-    // Nothing here moves, so there is nothing to advance.
     zones: [],
     shadowCasters,
-    update() {},
+    update(simTime: number) {
+      for (const mover of movers) {
+        mover.mesh.rotationQuaternion = mover.rotationAt(oscillate(simTime, mover));
+      }
+    },
     dispose() {
       for (const s of statics) {
         s.transformNode.dispose();
