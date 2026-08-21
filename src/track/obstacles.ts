@@ -83,6 +83,47 @@ function oscillate(simTime: number, mover: Pick<Mover, "minAngle" | "maxAngle" |
   return mid + amplitude * Math.cos((2 * Math.PI * simTime) / mover.period);
 }
 
+/**
+ * Finds, by bisection, the angle at which rotating `localOffset` (a point
+ * relative to the pivot, in the mesh's own unrotated local space) by
+ * `rotationAt(angle)` lands its world-space displacement from the pivot —
+ * projected onto `right` — at `targetLateral`.
+ *
+ * Numeric rather than closed-form on purpose: `rotationAt` composes the
+ * swing with the frame's own orientation, which maps local axes onto a
+ * curved, banked track rather than the flat reference a plain sine would
+ * assume — solving it directly avoids re-deriving that trigonometry by
+ * hand, which is exactly what put a baffle in the water on the first pass
+ * at this (see the comment on that pivot maths). Assumes the projected
+ * displacement is monotonic in `angle` over [0, π/2], which holds for the
+ * geometry this is used on.
+ */
+function solveSwingAngle(
+  rotationAt: (angle: number) => Quaternion,
+  localOffset: Vector3,
+  right: Vector3,
+  targetLateral: number,
+): number {
+  const lateralAt = (angle: number) =>
+    Vector3.Dot(
+      Vector3.TransformNormal(localOffset, rotationAt(angle).toRotationMatrix(new Matrix())),
+      right,
+    );
+  // Which way `lateralAt` moves as the angle opens up, checked rather than
+  // assumed, so the bisection below updates the correct bound regardless of
+  // which way that turns out to be.
+  const increasing = lateralAt(Math.PI / 2) > lateralAt(0);
+  let lo = 0;
+  let hi = Math.PI / 2;
+  for (let i = 0; i < 30; i++) {
+    const mid = (lo + hi) / 2;
+    const below = lateralAt(mid) < targetLateral;
+    if (below === increasing) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
 export interface ObstacleSet {
   update(simTime: number): void;
   readonly zones: ForceZone[];
@@ -516,12 +557,72 @@ export function buildObstacles(
         // Splits the field left and right. Sized so each side is a real lane.
         const length = 5.5;
         const height = 2.2;
+        const halfLength = length / 2;
         // Each side of the wedge has to be a lane in its own right.
         const width = Math.max(1.2, Math.min(frame.width * 0.55, frame.width * 2 - MIN_CLEAR_LANE));
         const wedge = createWedge("wedge", width, length, height, scene);
-        wedge.rotationQuaternion = frameRotation(frame);
-        wedge.position = frame.position.add(frame.right.scale(p.offset * frame.width * 0.3));
-        commit([wedge], materials.timber, { restitution: 0.2, friction: 0.3 });
+
+        const baseRotation = frameRotation(frame);
+
+        // Pivot at the centre of the fat (downstream) edge, inset slightly
+        // so the hinge sits just inside the block rather than exactly on
+        // its surface.
+        const inset = 0.5;
+        const pivotLocal = new Vector3(0, height / 2, halfLength - inset);
+        const centroid = frame.position.add(frame.right.scale(p.offset * frame.width * 0.3));
+        const worldPivot = centroid.add(
+          Vector3.TransformNormal(pivotLocal, baseRotation.toRotationMatrix(new Matrix())),
+        );
+        const apexOffset = new Vector3(0, 0, -halfLength).subtract(pivotLocal);
+        const pivotLateral = Vector3.Dot(worldPivot.subtract(frame.position), frame.right);
+
+        // Swings toward whichever wall the wedge's own static offset leaves
+        // least covered — the side a marble hugging the edge could get past
+        // untouched at rest — rather than doubling down on the side it
+        // already favours.
+        const wallSide = p.offset >= 0 ? -1 : 1;
+        const targetLateral = wallSide * frame.width - pivotLateral;
+
+        // Which sign of the local swing rotation actually sweeps the apex
+        // towards that wall isn't assumed: `right`/`up`/`tangent` don't line
+        // up with the world axes the swing rotates about, so the mapping
+        // from "positive angle" to "which side" depends on this frame's own
+        // orientation and isn't the same from one wedge to the next. Tried
+        // with +1 first and flipped if that swept the wrong way rather than
+        // solved for directly, which is what left an earlier version of
+        // this searching for a target on a side the rotation never reached.
+        let swingSign: 1 | -1 = 1;
+        const rotationAt = (angle: number) =>
+          Quaternion.RotationAxis(Vector3.Up(), swingSign * angle).multiply(baseRotation);
+        const lateralAt = (angle: number) =>
+          Vector3.Dot(
+            Vector3.TransformNormal(apexOffset, rotationAt(angle).toRotationMatrix(new Matrix())),
+            frame.right,
+          );
+        if (Math.sign(lateralAt(Math.PI / 4) - lateralAt(0)) !== Math.sign(targetLateral)) {
+          swingSign = -1;
+        }
+
+        // How far the apex has to swing to reach the true channel edge here
+        // — solved rather than assumed, since it depends on this frame's
+        // own width and the wedge's own static offset.
+        const maxAngle = solveSwingAngle(rotationAt, apexOffset, frame.right, targetLateral);
+
+        wedge.setPivotPoint(pivotLocal);
+        wedge.position = worldPivot.subtract(pivotLocal);
+        // The collider freezes here, at rest — see the module comment on
+        // why an oscillating obstacle's physics shape doesn't move with it.
+        wedge.rotationQuaternion = rotationAt(0);
+
+        commitMover(
+          wedge,
+          materials.timber,
+          { restitution: 0.2, friction: 0.3 },
+          rotationAt,
+          0,
+          maxAngle,
+          OSCILLATION_PERIOD,
+        );
         break;
       }
 
