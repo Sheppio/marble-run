@@ -19,19 +19,22 @@ import type { Theme } from "../render/theme";
  * All of them are static, physically: fixed collision geometry bolted to
  * the track, exactly as a wooden marble run has. Baffles and wedges are the
  * exception only in how they *look* — their visible mesh swings on a slow
- * ease-in-ease-out cycle, but the collider a marble actually feels stays
- * fixed at the swing's own maximum extent.
+ * ease-in-ease-out cycle, but the collider a marble actually feels never
+ * moves. It isn't parked at one fixed pose within the swing either, though
+ * — see `commitMover` for why that let marbles pass clean through — it's
+ * built to cover the mesh's whole swept range at once.
  *
- * That split is deliberate, not an oversight. A kinematic collider pushes
- * with effectively infinite force, so it can pin a marble against a wall in
- * a way nothing recovers from, and at these speeds a marble carries so
- * little momentum that a moving part tends to stop it dead rather than
- * deflect it. This was tried for real — a genuinely moving collider, plus a
- * contact-based "back off early if something's stuck" safeguard — and
- * measured directly against the tuning harness: 100% finish rate dropped to
- * 68–78% depending on the exact safeguard, and no variant tried closed the
- * gap. The mesh keeps the motion the obstacle was asked for; the collider
- * keeps the finish rate the game already had.
+ * The collider not moving at all is deliberate, not an oversight. A
+ * kinematic collider pushes with effectively infinite force, so it can pin
+ * a marble against a wall in a way nothing recovers from, and at these
+ * speeds a marble carries so little momentum that a moving part tends to
+ * stop it dead rather than deflect it. This was tried for real — a
+ * genuinely moving collider, plus a contact-based "back off early if
+ * something's stuck" safeguard — and measured directly against the tuning
+ * harness: 100% finish rate dropped to 68–78% depending on the exact
+ * safeguard, and no variant tried closed the gap. The mesh keeps the motion
+ * the obstacle was asked for; the collider keeps the finish rate the game
+ * already had.
  *
  * Layouts are regular — bowling-pin triangles, square grids, evenly spaced
  * baffles — rather than randomly scattered. A regular pattern reads as
@@ -87,7 +90,10 @@ function oscillate(simTime: number, mover: Pick<Mover, "minAngle" | "maxAngle" |
  * Finds, by bisection, the angle at which rotating `localOffset` (a point
  * relative to the pivot, in the mesh's own unrotated local space) by
  * `rotationAt(angle)` lands its world-space displacement from the pivot —
- * projected onto `right` — at `targetLateral`.
+ * projected onto `right` — at `targetLateral`. Searches the full
+ * [-π/2, π/2] range in one pass, so a target on either side of centre is
+ * found directly rather than needing the caller to guess which sign of
+ * angle reaches which side first.
  *
  * Numeric rather than closed-form on purpose: `rotationAt` composes the
  * swing with the frame's own orientation, which maps local axes onto a
@@ -95,8 +101,8 @@ function oscillate(simTime: number, mover: Pick<Mover, "minAngle" | "maxAngle" |
  * assume — solving it directly avoids re-deriving that trigonometry by
  * hand, which is exactly what put a baffle in the water on the first pass
  * at this (see the comment on that pivot maths). Assumes the projected
- * displacement is monotonic in `angle` over [0, π/2], which holds for the
- * geometry this is used on.
+ * displacement is monotonic in `angle` over the searched range, which holds
+ * for the geometry this is used on.
  */
 function solveSwingAngle(
   rotationAt: (angle: number) => Quaternion,
@@ -109,11 +115,11 @@ function solveSwingAngle(
       Vector3.TransformNormal(localOffset, rotationAt(angle).toRotationMatrix(new Matrix())),
       right,
     );
-  // Which way `lateralAt` moves as the angle opens up, checked rather than
-  // assumed, so the bisection below updates the correct bound regardless of
-  // which way that turns out to be.
-  const increasing = lateralAt(Math.PI / 2) > lateralAt(0);
-  let lo = 0;
+  // Which way `lateralAt` moves as the angle sweeps from -π/2 to π/2,
+  // checked rather than assumed, so the bisection below updates the
+  // correct bound regardless of which way that turns out to be.
+  const increasing = lateralAt(Math.PI / 2) > lateralAt(-Math.PI / 2);
+  let lo = -Math.PI / 2;
   let hi = Math.PI / 2;
   for (let i = 0; i < 30; i++) {
     const mid = (lo + hi) / 2;
@@ -465,34 +471,92 @@ export function buildObstacles(
 
   const movers: Mover[] = [];
 
+  /** How many poses across the swing sample the static collider. */
+  const ENVELOPE_SAMPLES = 5;
+
   /**
-   * Commits a single mesh as its own (ordinary, unmoving) static body —
-   * unlike `commit`, never merged with anything else, because a mover needs
-   * its own transform to swing independently of whatever else is nearby.
-   * The mesh's `rotationQuaternion` is expected to already be set to
-   * `maxAngle` before this runs: that's the pose the collider is built
-   * from and then keeps for good, per the module comment above, however
-   * the mesh itself goes on to animate.
+   * Builds an oscillating obstacle: one mesh that's actually rendered and
+   * animated, plus a static collider that covers its *whole* swept range
+   * rather than one fixed pose within it.
+   *
+   * A single frozen pose (tried first) left a real gap between what a
+   * marble could see and what it could touch: the mesh spends almost all
+   * of its time somewhere other than that one angle, and a marble arriving
+   * while it was elsewhere would find nothing there to stop it — reported
+   * directly as marbles passing clean through an obstacle that still
+   * looked, on screen, like it was in the way. Sampling `ENVELOPE_SAMPLES`
+   * poses across [minAngle, maxAngle] and merging them into one static body
+   * covers the full swing without the body itself ever moving, so it keeps
+   * the same zero-pinning-risk guarantee the module comment above explains
+   * a moving collider doesn't.
+   *
+   * `buildMesh` must return a fresh, default-oriented mesh each call (not a
+   * clone of something already posed) — it's called once for the visible
+   * mesh and again for each envelope sample.
+   *
+   * The envelope samples `[colliderMinAngle, colliderMaxAngle]`, which
+   * default to the mesh's own `[minAngle, maxAngle]` but can be given
+   * narrower: a shape that's a large fraction of the channel's own width
+   * (the wedge) unions into a permanent wall-to-wall block if the envelope
+   * covers a swing wide enough to reach both channel edges in turn, which is
+   * a worse, *permanent* version of exactly the blocking a moving collider
+   * risked — measured directly (778 rescues at the wedge alone, finish rate
+   * 70.8%) before this split was added. Narrowing the envelope to a margin
+   * around rest keeps the collider inside the region every sample can still
+   * pass on both sides of, while the mesh itself keeps swinging its full,
+   * requested distance.
    */
   const commitMover = (
-    mesh: Mesh,
+    buildMesh: (name: string) => Mesh,
     material: PBRMaterial,
     physics: { restitution: number; friction: number },
     rotationAt: (angle: number) => Quaternion,
+    pivotLocal: Vector3,
+    worldPivot: Vector3,
     minAngle: number,
     maxAngle: number,
     period: number,
+    colliderMinAngle: number = minAngle,
+    colliderMaxAngle: number = maxAngle,
   ) => {
-    mesh.material = material;
+    // The one mesh actually drawn and animated frame to frame.
+    const visible = buildMesh("mover");
+    visible.material = material;
+    visible.isPickable = false;
+    visible.setPivotPoint(pivotLocal);
+    visible.position = worldPivot.subtract(pivotLocal);
+    visible.rotationQuaternion = rotationAt(maxAngle);
+    shadowCasters.push(visible);
+
+    // The static collider: several un-pivoted copies of the same shape,
+    // each posed at a sampled angle and positioned so that pose's own
+    // version of the pivot point lands back on the real hinge — the same
+    // relationship `visible`'s pivot maintains automatically, worked out
+    // by hand here since these copies don't carry a pivot of their own.
+    const parts: Mesh[] = [];
+    for (let i = 0; i < ENVELOPE_SAMPLES; i++) {
+      const t = i / (ENVELOPE_SAMPLES - 1);
+      const angle = colliderMinAngle + (colliderMaxAngle - colliderMinAngle) * t;
+      const copy = buildMesh("mover-envelope");
+      const rotation = rotationAt(angle);
+      copy.rotationQuaternion = rotation;
+      copy.position = worldPivot.subtract(
+        Vector3.TransformNormal(pivotLocal, rotation.toRotationMatrix(new Matrix())),
+      );
+      parts.push(copy);
+    }
+    const merged = Mesh.MergeMeshes(parts, true, true) as Mesh;
+    merged.isVisible = false;
+    merged.isPickable = false;
     const aggregate = new PhysicsAggregate(
-      mesh,
+      merged,
       PhysicsShapeType.MESH,
       { mass: 0, ...physics },
       scene,
     );
     statics.push(aggregate);
-    shadowCasters.push(mesh);
-    movers.push({ mesh, rotationAt, minAngle, maxAngle, period });
+
+    movers.push({ mesh: visible, rotationAt, minAngle, maxAngle, period });
   };
 
   for (const spec of specs) {
@@ -560,7 +624,6 @@ export function buildObstacles(
         const halfLength = length / 2;
         // Each side of the wedge has to be a lane in its own right.
         const width = Math.max(1.2, Math.min(frame.width * 0.55, frame.width * 2 - MIN_CLEAR_LANE));
-        const wedge = createWedge("wedge", width, length, height, scene);
 
         const baseRotation = frameRotation(frame);
 
@@ -576,52 +639,42 @@ export function buildObstacles(
         const apexOffset = new Vector3(0, 0, -halfLength).subtract(pivotLocal);
         const pivotLateral = Vector3.Dot(worldPivot.subtract(frame.position), frame.right);
 
-        // Swings toward whichever wall the wedge's own static offset leaves
-        // least covered — the side a marble hugging the edge could get past
-        // untouched at rest — rather than doubling down on the side it
-        // already favours.
-        const wallSide = p.offset >= 0 ? -1 : 1;
-        const targetLateral = wallSide * frame.width - pivotLateral;
+        // Rocks the apex to both walls in turn, not just the one its static
+        // offset leaves least covered — a marble hugging either edge should
+        // eventually meet it swung out that way. `solveSwingAngle` now
+        // searches signed angles directly, so each wall is just its own
+        // solve rather than needing a guessed swing direction that might
+        // sweep the wrong way (an earlier version of this had to detect and
+        // flip that by hand).
+        const rotationAt = (angle: number) => Quaternion.RotationAxis(Vector3.Up(), angle).multiply(baseRotation);
+        const angleToRight = solveSwingAngle(rotationAt, apexOffset, frame.right, frame.width - pivotLateral);
+        const angleToLeft = solveSwingAngle(rotationAt, apexOffset, frame.right, -frame.width - pivotLateral);
+        const minAngle = Math.min(angleToLeft, angleToRight);
+        const maxAngle = Math.max(angleToLeft, angleToRight);
 
-        // Which sign of the local swing rotation actually sweeps the apex
-        // towards that wall isn't assumed: `right`/`up`/`tangent` don't line
-        // up with the world axes the swing rotates about, so the mapping
-        // from "positive angle" to "which side" depends on this frame's own
-        // orientation and isn't the same from one wedge to the next. Tried
-        // with +1 first and flipped if that swept the wrong way rather than
-        // solved for directly, which is what left an earlier version of
-        // this searching for a target on a side the rotation never reached.
-        let swingSign: 1 | -1 = 1;
-        const rotationAt = (angle: number) =>
-          Quaternion.RotationAxis(Vector3.Up(), swingSign * angle).multiply(baseRotation);
-        const lateralAt = (angle: number) =>
-          Vector3.Dot(
-            Vector3.TransformNormal(apexOffset, rotationAt(angle).toRotationMatrix(new Matrix())),
-            frame.right,
-          );
-        if (Math.sign(lateralAt(Math.PI / 4) - lateralAt(0)) !== Math.sign(targetLateral)) {
-          swingSign = -1;
-        }
-
-        // How far the apex has to swing to reach the true channel edge here
-        // — solved rather than assumed, since it depends on this frame's
-        // own width and the wedge's own static offset.
-        const maxAngle = solveSwingAngle(rotationAt, apexOffset, frame.right, targetLateral);
-
-        wedge.setPivotPoint(pivotLocal);
-        wedge.position = worldPivot.subtract(pivotLocal);
-        // The collider freezes here, at rest — see the module comment on
-        // why an oscillating obstacle's physics shape doesn't move with it.
-        wedge.rotationQuaternion = rotationAt(0);
+        // The wedge's own width is already a large fraction of the channel,
+        // so sweeping its collider across the mesh's *whole* range — apex
+        // touching one wall in turn — unions into a block spanning
+        // wall-to-wall, permanently: worse than a moving one, since it never
+        // reopens. Measured directly: 70.8% finish rate, 778 rescues at the
+        // wedge alone. The collider is kept to a margin around the wedge's
+        // original resting pose instead, narrow enough that every sampled
+        // pose still leaves both flanks clear; the mesh still swings its
+        // full, requested distance out to each wall.
+        const colliderFraction = 0.18;
 
         commitMover(
-          wedge,
+          (name) => createWedge(name, width, length, height, scene),
           materials.timber,
           { restitution: 0.2, friction: 0.3 },
           rotationAt,
-          0,
+          pivotLocal,
+          worldPivot,
+          minAngle,
           maxAngle,
           OSCILLATION_PERIOD,
+          minAngle * colliderFraction,
+          maxAngle * colliderFraction,
         );
         break;
       }
@@ -633,14 +686,19 @@ export function buildObstacles(
         //
         // Each swings on its own hinge — planted at the point where its root
         // meets the wall, so the tip is what sweeps — between `lean` (its
-        // original, permanently-fixed angle) and half of that, easing in and
-        // out. The hinge is what `lean` on its own no longer needs to
-        // reproduce; that's carried by each baffle's own pivot instead. Kept
-        // as individual bodies rather than merged into one like every other
-        // static obstacle here, because a merged mesh has one shared
-        // transform and these need to swing about their own separate hinges
-        // even though (per the tuning behind `OSCILLATION_PERIOD`) they all
-        // swing in step.
+        // original, permanently-fixed angle) and 1.5x that, easing in and
+        // out. Increasing rather than halving: `lean` is measured from
+        // square-across-the-channel, so a *smaller* lean is more
+        // perpendicular to the wall, not more parallel with it — swinging
+        // down towards half, tried first, swept the tip further out into
+        // the channel instead of folding it back towards the wall the way
+        // it reads as doing. The hinge is what `lean` on its own no longer
+        // needs to reproduce; that's carried by each baffle's own pivot
+        // instead. Kept as individual bodies rather than merged into one
+        // like every other static obstacle here, because a merged mesh has
+        // one shared transform and these need to swing about their own
+        // separate hinges even though (per the tuning behind
+        // `OSCILLATION_PERIOD`) they all swing in step.
         const count = Math.round(p.count);
         // Spaced out, so the field has room to re-form between them.
         const spacing = 8.0;
@@ -668,14 +726,14 @@ export function buildObstacles(
           // Flush with the inner face of the wall was not enough: the sweep
           // rotates the baffle about its own centre, which swings the root
           // inward and leaves the whole upstream corner standing proud of the
-          // wall in plain sight. Burying it is what hides that corner.
-          //
-          // Held under the shell thickness so the root stops inside the wall
-          // rather than breaking out of the far side of it.
-          const embed = Math.min(TRACK_CONSTANTS.shellThickness * 0.85, 1.0);
+          // wall in plain sight. Burying it is what hides that corner. Held
+          // generously under the shell thickness rather than right up
+          // against it — the root has to stay hidden across the whole swing
+          // now, not just at one fixed lean, and the corner's own protrusion
+          // past the nominal wall line grows with how far the swing reaches.
+          const embed = Math.min(TRACK_CONSTANTS.shellThickness * 1.3, 1.8);
           const width = reach + embed;
           const halfWidth = width / 2;
-          const baffle = CreateBox("baffle", { width, height, depth: thickness }, scene);
 
           // Angled to present a guiding face to oncoming marbles. The lean is
           // measured, not assumed: leaning it the other way was tried and made
@@ -703,22 +761,15 @@ export function buildObstacles(
             Vector3.TransformNormal(pivotLocal, rotationAt(lean).toRotationMatrix(new Matrix())),
           );
 
-          // `setPivotPoint` moves the centre of rotation to that corner
-          // without moving the mesh: position still places the *original*
-          // local origin, so it has to move by the same local offset to
-          // compensate, or the baffle would jump the moment the pivot
-          // changed.
-          baffle.setPivotPoint(pivotLocal);
-          baffle.position = worldRoot.subtract(pivotLocal);
-          baffle.rotationQuaternion = rotationAt(lean);
-
           commitMover(
-            baffle,
+            (name) => CreateBox(name, { width, height, depth: thickness }, scene),
             materials.rubber,
             { restitution: 0.25, friction: baffleFriction() },
             rotationAt,
-            lean / 2,
+            pivotLocal,
+            worldRoot,
             lean,
+            lean * 1.5,
             OSCILLATION_PERIOD,
           );
         }

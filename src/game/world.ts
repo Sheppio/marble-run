@@ -311,6 +311,7 @@ export class World {
   private waterBaseY = 0;
   private boats: Boat[] = [];
   private boatTime = 0;
+  private obstacleTime = 0;
 
   constructor(options: WorldOptions) {
     if (!havokInstance) {
@@ -485,7 +486,15 @@ export class World {
         this.gateBody.dispose();
         this.gateBody = null;
       }
-      this.obstacles.update(Math.max(0, this.race.simTime));
+      // Its own clock, not the race's: `race.simTime` sits frozen at 0 until
+      // the race actually starts (and holds at its final value once it
+      // finishes), which left baffles and wedges motionless until the start
+      // banner went up. This one advances on every physics step regardless
+      // of race state, so the oscillation is already running the moment the
+      // level loads, and — since physics stepping is fixed-step — stays just
+      // as reproducible as everything else driven off it.
+      this.obstacleTime += FIXED_STEP;
+      this.obstacles.update(this.obstacleTime);
     });
     this.scene.onAfterPhysicsObservable.add(() => {
       this.race.postStep();
