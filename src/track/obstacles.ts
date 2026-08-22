@@ -4,7 +4,7 @@ import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
 import { PhysicsAggregate } from "@babylonjs/core/Physics/v2/physicsAggregate";
-import { PhysicsShapeType } from "@babylonjs/core/Physics/v2/IPhysicsEnginePlugin";
+import { PhysicsMotionType, PhysicsShapeType } from "@babylonjs/core/Physics/v2/IPhysicsEnginePlugin";
 import type { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import type { Scene } from "@babylonjs/core/scene";
 import { applyDetail, createSurface } from "../render/materials";
@@ -16,25 +16,32 @@ import type { Theme } from "../render/theme";
 /**
  * Obstacles.
  *
- * All of them are static, physically: fixed collision geometry bolted to
- * the track, exactly as a wooden marble run has. Baffles and wedges are the
- * exception only in how they *look* — their visible mesh swings on a slow
- * ease-in-ease-out cycle, but the collider a marble actually feels never
- * moves. It isn't parked at one fixed pose within the swing either, though
- * — see `commitMover` for why that let marbles pass clean through — it's
- * built to cover the mesh's whole swept range at once.
+ * Most are static, physically: fixed collision geometry bolted to the
+ * track, exactly as a wooden marble run has. Baffles and wedges swing on a
+ * slow ease-in-ease-out cycle instead, and the two take different physical
+ * approaches to it — see `commitMover`.
  *
- * The collider not moving at all is deliberate, not an oversight. A
- * kinematic collider pushes with effectively infinite force, so it can pin
- * a marble against a wall in a way nothing recovers from, and at these
- * speeds a marble carries so little momentum that a moving part tends to
- * stop it dead rather than deflect it. This was tried for real — a
- * genuinely moving collider, plus a contact-based "back off early if
- * something's stuck" safeguard — and measured directly against the tuning
- * harness: 100% finish rate dropped to 68–78% depending on the exact
- * safeguard, and no variant tried closed the gap. The mesh keeps the motion
- * the obstacle was asked for; the collider keeps the finish rate the game
- * already had.
+ * A baffle's collider never moves at all; it's built to cover the mesh's
+ * whole swept range at once rather than track it. A genuinely moving
+ * collider was tried for baffles specifically — real kinematic physics,
+ * plus a contact-based "back off early if something's stuck" safeguard —
+ * and measured directly against the tuning harness: 100% finish rate
+ * dropped to 68–78% depending on the exact safeguard, and no variant tried
+ * closed the gap. A flat paddle swinging into a slow marble tends to stop
+ * it dead against whatever it's backed against rather than deflect it, and
+ * a kinematic collider pushes with effectively infinite force, so that
+ * pinning is permanent.
+ *
+ * A wedge's collider does move — real kinematic physics, tracking the
+ * visible mesh exactly. Its faces are angled to the direction of travel
+ * rather than flat against it, so contact tends to glance a marble off
+ * rather than crush it against a wall the way a baffle can; measured
+ * finish rate confirms it (no regression from the fully static baseline).
+ * A static envelope was tried first, matching the baffle's approach, but a
+ * wedge is already close to half the channel wide at any single pose, so
+ * covering its whole swing unions into a permanent wall-to-wall block —
+ * worse than a moving one, since it never reopens (778 rescues at the
+ * wedge alone, finish rate 70.8%, before this was caught).
  *
  * Layouts are regular — bowling-pin triangles, square grids, evenly spaced
  * baffles — rather than randomly scattered. A regular pattern reads as
@@ -476,35 +483,32 @@ export function buildObstacles(
 
   /**
    * Builds an oscillating obstacle: one mesh that's actually rendered and
-   * animated, plus a static collider that covers its *whole* swept range
-   * rather than one fixed pose within it.
+   * animated, plus a collider that tracks its motion — see the module
+   * comment for why baffles and wedges take different approaches to that
+   * collider, chosen via `kinematic`.
    *
-   * A single frozen pose (tried first) left a real gap between what a
+   * `kinematic: true` gives the visible mesh its own physics body directly,
+   * set to `PhysicsMotionType.ANIMATED` with `disablePreStep` off — the
+   * same mechanism `Marble.freeze()` uses. Havok reads an ANIMATED body's
+   * target transform straight off the node's own absolutePosition and
+   * absoluteRotationQuaternion each physics step, so simply letting
+   * `update` keep setting `visible.rotationQuaternion` every frame is
+   * enough to drive it; no separate collider mesh is built.
+   *
+   * `kinematic: false` (the default) builds a static collider instead, that
+   * covers the mesh's *whole* swept range rather than one fixed pose within
+   * it. A single frozen pose (tried first) left a real gap between what a
    * marble could see and what it could touch: the mesh spends almost all
    * of its time somewhere other than that one angle, and a marble arriving
    * while it was elsewhere would find nothing there to stop it — reported
    * directly as marbles passing clean through an obstacle that still
    * looked, on screen, like it was in the way. Sampling `ENVELOPE_SAMPLES`
    * poses across [minAngle, maxAngle] and merging them into one static body
-   * covers the full swing without the body itself ever moving, so it keeps
-   * the same zero-pinning-risk guarantee the module comment above explains
-   * a moving collider doesn't.
+   * covers the full swing without the body itself ever moving.
    *
    * `buildMesh` must return a fresh, default-oriented mesh each call (not a
    * clone of something already posed) — it's called once for the visible
-   * mesh and again for each envelope sample.
-   *
-   * The envelope samples `[colliderMinAngle, colliderMaxAngle]`, which
-   * default to the mesh's own `[minAngle, maxAngle]` but can be given
-   * narrower: a shape that's a large fraction of the channel's own width
-   * (the wedge) unions into a permanent wall-to-wall block if the envelope
-   * covers a swing wide enough to reach both channel edges in turn, which is
-   * a worse, *permanent* version of exactly the blocking a moving collider
-   * risked — measured directly (778 rescues at the wedge alone, finish rate
-   * 70.8%) before this split was added. Narrowing the envelope to a margin
-   * around rest keeps the collider inside the region every sample can still
-   * pass on both sides of, while the mesh itself keeps swinging its full,
-   * requested distance.
+   * mesh and again for each envelope sample (when not kinematic).
    */
   const commitMover = (
     buildMesh: (name: string) => Mesh,
@@ -516,8 +520,7 @@ export function buildObstacles(
     minAngle: number,
     maxAngle: number,
     period: number,
-    colliderMinAngle: number = minAngle,
-    colliderMaxAngle: number = maxAngle,
+    kinematic = false,
   ) => {
     // The one mesh actually drawn and animated frame to frame.
     const visible = buildMesh("mover");
@@ -528,6 +531,15 @@ export function buildObstacles(
     visible.rotationQuaternion = rotationAt(maxAngle);
     shadowCasters.push(visible);
 
+    if (kinematic) {
+      const aggregate = new PhysicsAggregate(visible, PhysicsShapeType.MESH, { mass: 0, ...physics }, scene);
+      aggregate.body.setMotionType(PhysicsMotionType.ANIMATED);
+      aggregate.body.disablePreStep = false;
+      statics.push(aggregate);
+      movers.push({ mesh: visible, rotationAt, minAngle, maxAngle, period });
+      return;
+    }
+
     // The static collider: several un-pivoted copies of the same shape,
     // each posed at a sampled angle and positioned so that pose's own
     // version of the pivot point lands back on the real hinge — the same
@@ -536,7 +548,7 @@ export function buildObstacles(
     const parts: Mesh[] = [];
     for (let i = 0; i < ENVELOPE_SAMPLES; i++) {
       const t = i / (ENVELOPE_SAMPLES - 1);
-      const angle = colliderMinAngle + (colliderMaxAngle - colliderMinAngle) * t;
+      const angle = minAngle + (maxAngle - minAngle) * t;
       const copy = buildMesh("mover-envelope");
       const rotation = rotationAt(angle);
       copy.rotationQuaternion = rotation;
@@ -652,17 +664,9 @@ export function buildObstacles(
         const minAngle = Math.min(angleToLeft, angleToRight);
         const maxAngle = Math.max(angleToLeft, angleToRight);
 
-        // The wedge's own width is already a large fraction of the channel,
-        // so sweeping its collider across the mesh's *whole* range — apex
-        // touching one wall in turn — unions into a block spanning
-        // wall-to-wall, permanently: worse than a moving one, since it never
-        // reopens. Measured directly: 70.8% finish rate, 778 rescues at the
-        // wedge alone. The collider is kept to a margin around the wedge's
-        // original resting pose instead, narrow enough that every sampled
-        // pose still leaves both flanks clear; the mesh still swings its
-        // full, requested distance out to each wall.
-        const colliderFraction = 0.18;
-
+        // Real kinematic collider, tracking the mesh exactly — see the
+        // module comment for why the wedge takes this and the baffle
+        // doesn't.
         commitMover(
           (name) => createWedge(name, width, length, height, scene),
           materials.timber,
@@ -673,8 +677,7 @@ export function buildObstacles(
           minAngle,
           maxAngle,
           OSCILLATION_PERIOD,
-          minAngle * colliderFraction,
-          maxAngle * colliderFraction,
+          true,
         );
         break;
       }
